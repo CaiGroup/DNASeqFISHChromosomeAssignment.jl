@@ -1,6 +1,5 @@
 using CSV
 using DataFrames
-using Clustering
 using DNASeqFISHChromosomeAssignment
 using SparseArrays
 using Test
