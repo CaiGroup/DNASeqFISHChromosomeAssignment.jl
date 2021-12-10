@@ -7,31 +7,32 @@ using GLPK
 using Clustering
 
 """
-assign_chromosomes(pnts :: DataFrame,
-	 			   search_radius :: Real,
-				   sigma :: Real,
-				   max_strands :: Int64,
-				   min_size :: Int64 = 2)
+	assign_chromosomes(pnts :: DataFrame,
+	 			search_radius :: Real,
+				sigma :: Real,
+				max_strands :: Int64,
+				min_size :: Int64 = 2)
 
 Assigns genomic loci from DNA seqFISH data to indiviual chromosomes. Builds
 a directed acyclic graph where every locus has an out going edge to genomically
 down stream loci within the search radius. Edges are weighted by:
 
-edge_weight = (max_genomic_coord - (parent_genomic coord - child_genomic_coord))*
-			exp(-(||x_parent - x_child||^2)/(2σ^2))
+``
+w_e = (g_{max} - (g_p - g_c)) × e^{-\frac{||x_p - x_child||^2}{2σ^2}}
+``
 
 Searches for up to max_strands disjoint paths that maximize the sum of
 the weights of all edges in the paths
 
 Takes a DataFrame (pnts) of decoded DNA seqFISH data where each column describes a locus.
 Must include columns:
-	"fov" : the field of view in which locus was imaged
-	"cellID" : the cell in which the locus was imaged
-	"chrom" : chromosome on which locus is located
-	"x" : x spatial coordinate of locus
-	"y" : y spatial coordinate of locus
-	"z" : z spatial coordinate of locus
-	"pos" : genomic coordinate of locus
+- `fov` : the field of view in which locus was imaged
+- `cellID` : the cell in which the locus was imaged
+- `chrom` : chromosome on which locus is located
+- `x` : x spatial coordinate of locus
+- `y` : y spatial coordinate of locus
+- `z` : z spatial coordinate of locus
+- `pos` : genomic coordinate of locus
 
 The search radius gives how far in space to search for neighboring loci on the same
 chromosome strand for each locus.

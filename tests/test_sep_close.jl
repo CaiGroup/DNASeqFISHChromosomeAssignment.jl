@@ -4,8 +4,8 @@ using DNASeqFISHChromosomeAssignment
 using SparseArrays
 using Test
 
-close_chrms = DataFrame(CSV.File("close_chroms.csv"))
-far_chrms = DataFrame(CSV.File("far_chroms.csv"))
+close_chrms = DataFrame(CSV.File("tests/close_chroms.csv"))
+far_chrms = DataFrame(CSV.File("tests/far_chroms.csv"))
 
 
 r = 1500
