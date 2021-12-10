@@ -11,42 +11,90 @@ using Clustering
 	 			search_radius :: Real,
 				sigma :: Real,
 				max_strands :: Int64,
-				min_size :: Int64 = 2)
+				min_size :: Int64 = 2,
+				dbscan :: Bool = true,
+				dbscan_min_pnts :: Int64 = 10,
+				ldp_overlap_thresh :: Float64 = 0.99)
 
-Assigns genomic loci from DNA seqFISH data to indiviual chromosomes. Builds
-a directed acyclic graph where every locus has an out going edge to genomically
+This function assigns genomic loci from DNA seqFISH+ data to indiviual chromosomes using DBSCAN and Longest Disjoint Paths (LDP).
+LDP includes spatial and genomic information to effectely separate chromosome copies that are close to each other
+in the cell, while DBSCAN is able to classify repiclated loci onto chromosomes.
+
+
+LDP builds a directed acyclic graph where every locus has an out going edge to genomically
 down stream loci within the search radius. Edges are weighted by:
 
 ``
-w_e = (g_{max} - (g_p - g_c)) × e^{-\frac{||x_p - x_child||^2}{2σ^2}}
+w = (g_{max} - (g_p - g_c)) × e^{-\\frac{||x_p - x_c||^2}{2σ^2}}
 ``
 
-Searches for up to max_strands disjoint paths that maximize the sum of
-the weights of all edges in the paths
+where x denotes a vector of spatial coordinates, g denotes genomic coordinates, and p and c subscripts denote parent and child nodes respectively. ``g_{max}`` 
+is the maximum genomic coordinate for that chromosome found in the cell.
 
-Takes a DataFrame (pnts) of decoded DNA seqFISH data where each column describes a locus.
-Must include columns:
-- `fov` : the field of view in which locus was imaged
-- `cellID` : the cell in which the locus was imaged
-- `chrom` : chromosome on which locus is located
-- `x` : x spatial coordinate of locus
-- `y` : y spatial coordinate of locus
-- `z` : z spatial coordinate of locus
-- `pos` : genomic coordinate of locus
+LDP finds up to max_strands disjoint paths that maximize the sum of
+the weights of all edges in the paths.
 
-The search radius gives how far in space to search for neighboring loci on the same
+Arguments
+- df: Takes a DataFrame (pnts) of decoded DNA seqFISH data where each column describes a locus. Must include columns:
+	- fov : the field of view in which locus was imaged
+	- cellID : the cell in which the locus was imaged
+	- chrom : chromosome on which locus is located
+	- x : x spatial coordinate of locus
+	- y : y spatial coordinate of locus
+	- z : z spatial coordinate of locus
+	- pos : genomic coordinate of locus
+- `search_radius` : gives how far in space to search for neighboring loci on the same
 chromosome strand for each locus.
+- `sigma` : defines the weight function for how much to penalize grouping adjacent genomic loci onto the the same chromosome based on their spatial distance from each other.
+- `max_strands` : the maximum number of copies of each chromosome that we expect to find.
+- `min_size` : the minimum acceptable number of loci on a strand.
+- `dbscan` : if true, run both DBSCAN and LDP, then find the consensus, else use only LDP.
+- `dbscan_min_pnts` : the minimum allowed number of points for a DBSCAN cluster. DBSCAN clusters with fewer points are discarded .
+- `ldp_overlap_thresh` : the minimum proportion of LDP assigned loci that DBSCAN assigned the same for the two clusters two be merged
 
-The sigma value defines the weight function for how much to penalize grouping adjacent
-genomic loci onto the the same chromosome based on their spatial distance from each other
-
-The minimum size is the minimum acceptable number of loci on a strand.
-
-returns a copy of the input points sorted by fov, cell_ID, chrom, and pos with a
-new column: allele.
+returns a copy of the input points sorted by fov, cellID, chrom, and pos with a
+new column: `ldp_allele`. If the `dbscan` argument is true, also includes `dbscan_allele` and `final_allele` columns. 
 
 allele = -1 means that a locus was not assigned to a chromosome.
 allele > 0 indicates the chromsome number that the locus was assigned to.
+
+If the size of an intersection between a DBSCAN and LDP cluster divided by the size of the LDP cluster is more than than `ldp_overlap_thresh`, we say that the two clusters are the same.
+
+If every LDP cluster overlaps with exactly one DBSCAN cluster, and Every DBSCAN cluster overlaps with one or zero LDP clusters, we say the methods agreed, and the final clusters are the
+unions of the overlapping LDP and DBSCAN clusters. Otherwise, the final clusters and the LDP clusters.
+
+In the following example, LDP detects that two copies of a chromosome in the `close_chroms.csv` test data are distinct even though they are spatially close.
+
+```
+julia> first(data, 5)
+5×7 DataFrame
+ Row │ fov    cellID  chrom    x        y          z        pos   
+     │ Int64  Int64   String7  Float64  Float64    Float64  Int64 
+─────┼────────────────────────────────────────────────────────────
+   1 │     0      28  chr6     94128.3  1.23568e5  1631.25      1
+   2 │     0      28  chr6     92462.6  1.23556e5  2808.75      6
+   3 │     0      28  chr6     94006.9  1.23476e5  1833.25      8
+   4 │     0      28  chr6     93877.1  1.23784e5  2195.5      10
+   5 │     0      28  chr6     92537.5  1.23505e5  2940.0      11
+
+julia> r = 1500
+julia> sig = 750
+julia> max_paths = 2
+
+julia> res = assign_chromosomes(data, r, sig, max_paths)
+
+julia> first(res,5)
+5×10 DataFrame
+ Row │ fov    cellID  chrom    x        y          z        pos    ldp_allele  dbscan_allele  final_allele 
+     │ Int64  Int64   String7  Float64  Float64    Float64  Int64  Int64       Int64          Int64        
+─────┼─────────────────────────────────────────────────────────────────────────────────────────────────────
+   1 │     0      28  chr6     94128.3  1.23568e5  1631.25      1           1              1             1
+   2 │     0      28  chr6     92462.6  1.23556e5  2808.75      6           2              1             2
+   3 │     0      28  chr6     94006.9  1.23476e5  1833.25      8           1              1             1
+   4 │     0      28  chr6     93877.1  1.23784e5  2195.5      10           1              1             1
+   5 │     0      28  chr6     92537.5  1.23505e5  2940.0      11           2              1             2
+
+```
 """
 function assign_chromosomes(pnts :: DataFrame,
 	 						search_radius :: Real,
@@ -73,7 +121,7 @@ function assign_loci(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_siz
 	return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
 	if dbscan
 		dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r, dbscan_min_pnts, min_size)
-		return_df[!, "dpscan_allele"] = get_allele_col(chrm, dbscan_clusters)
+		return_df[!, "dbscan_allele"] = get_allele_col(chrm, dbscan_clusters)
 		return_df[!, "final_allele"] = compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands,ldp_overlap_thresh)
 	end
 	return return_df
@@ -207,27 +255,34 @@ function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overla
 
 	#LDPs = [Array(1:nrow(chrms))[chrms.allele .== p] for p in 1:maximum(ldp_allele)]
 
+	# find intersections of clusters by dbscan and ldp
 	intersections = [ldp ∩ dbc for ldp in ldps, dbc in dbscan_clusters]
+
+	#find the size of the intersections of clusters found by dbscan and ldp
 	intersection_sizes = length.(intersections)
 
 	accepted = zeros(Bool, size(intersections)...)
 
+	#check whether the cluster agreement passes the threshold
 	for ldp_ind in 1:max_strands
 	    accepted[ldp_ind, :] = (intersection_sizes[ldp_ind,:]./length(ldps[ldp_ind]) .> ldp_overlap_thresh)
 	end
 
-	nz_intersections = (intersection_sizes .> 0)
+	# find the number of DBSCAN clusters that each LDP cluster overlaps with
 	n_ldp_dbc_overlaps = sum(intersection_sizes .> 0, dims=2)
+	# find the number of LDP clusters that each DBSCAN cluster overlaps with
 	n_dbc_lpc_overlaps = sum(intersection_sizes .> 0, dims=1)
 
-	if ~ (all(n_ldp_dbc_overlaps .== 1) && all(n_dbc_lpc_overlaps .<= 1))
-	    #use ldps
-		allele = get_allele_col(chrm, ldps)
-	else
+	# Every LDP cluster must match two a DBSCAN cluster, and every DBSCAN cluster must match to 1 or 0 LDP cluster
+	# for us to use the consensus of the two methods. Otherwise, we use LDP only.
+	if (all(n_ldp_dbc_overlaps .== 1) && all(n_dbc_lpc_overlaps .<= 1)) 
 	    #use union of ldp and its overlapping dbc
 		ldp, dbc, val = findnz(sparse(accepted))
 	    clusters = [sort(ldps[ldp[i]] ∪ dbscan_clusters[dbc[i]]) for i in 1:length(ldp)]
 		allele = get_allele_col(chrm, clusters)
+	else
+		#use ldps
+		allele = get_allele_col(chrm, ldps)
 	end
 	return allele
 end
