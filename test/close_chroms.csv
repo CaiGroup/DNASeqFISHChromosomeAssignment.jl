@@ -1,4 +1,4 @@
-cellID,chrom,fov,hyb,channel,x,y,z,dot_int,Round 1,Round 2,Round 3,Round 4,name,pos,allele
+cellID,chrom,fov,hyb,channel,x,y,z,dot_int,Round 1,Round 2,Round 3,Round 4,name,g,allele
 28,chr6,0,1,1,94128.301,123567.76099999998,1631.25,9434,7,6,1,5,chr6-1,1,1
 28,chr6,0,4,1,92462.585,123555.504,2808.75,1197,7,6,1,5,chr6-6,6,2
 28,chr6,0,6,1,94006.864,123476.091,1833.25,547,7,6,1,5,chr6-8,8,1
