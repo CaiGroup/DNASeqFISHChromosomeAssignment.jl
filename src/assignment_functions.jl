@@ -230,12 +230,8 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	#set the src and dst node alleles
 	for _allele in 1:max_strands, nodes in [src_nodes, dst_nodes], node in nodes
 		@constraint(model, allele[node, _allele] <= 1)
-		@constraint(model, 1 <= allele[node, _allele]
+		@constraint(model, 1 <= allele[node, _allele])
 	end
-
-
-	# locus nodes connected to the src node must have different alleles
-	@constraint(model, sum.(x[(src, i)] for i in 1:n_locus_nodes])
 
 	#src and dst can have at most 2*max_strands edges
 	@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= max_strands*2)
@@ -261,10 +257,10 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
 
 	# each src node can have at most one outgoing edge
-	@constraint(model, [src in src_nodes] sum(x[src, nbr] for nbr in 1:locus_nodes) <= 1)
+	@constraint(model, [src in src_nodes], sum(x[src, nbr] for nbr in 1:locus_nodes) <= 1)
 
 	# each dst node can have at most one incoming edge 
-	@constraint(model, [dst in dst_nodes] sum(x[nbr, dst] for nbr in 1:locus_nodes) <= 1)
+	@constraint(model, [dst in dst_nodes], sum(x[nbr, dst] for nbr in 1:locus_nodes) <= 1)
 
 	# the null node does not have an allele (used for later constraint)
 	@constraint(model, sum(allele[end,:]) <= 0)
