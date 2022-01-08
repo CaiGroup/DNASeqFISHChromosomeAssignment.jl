@@ -135,7 +135,13 @@ function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :
 	wccs = weakly_connected_components(g2)
 	allele = fill(-1, nrow(chrm))
 	for wcc in wccs
-		wcc_ldps, wcc_allele = optimize_paths(chrm, g2[wcc], W2[wcc,wcc], min_size, max_strands)
+		println("nv(g2): ", nv(g2))
+		println("nrow(chrm): ", nrow(chrm))
+		println("size(wcc): ", size(wcc))
+		println("size(allele): ", size(allele))
+		wcc_ldps, wcc_allele = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
+		println("size(wcc_alele): ", size(wcc_allele))
+		
 		allele[wcc] .= wcc_allele
 	end
 end
@@ -187,7 +193,8 @@ end
 
 function rule_out_edges(A, W, WR)
     nnodes = size(A)[1]
-    A2 = spzeros(nnodes+2, nnodes+2)
+    #A2 = spzeros(nnodes+2, nnodes+2)
+	A2 = spzeros(nnodes, nnodes)
     W2 = spzeros(size(A)...)
     for i in 1:nnodes
         min_weight_reduced_arc = isempty(nonzeros(WR[i,:])) ? 0.0 : minimum(nonzeros(WR[i,:]))
@@ -201,13 +208,18 @@ end
 
 #function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
 function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
-	n_locus_nodes = nv(g)-2
-	src_nodes = Array((n_locus_nodes+1):(2*max_strands))
-	dst_nodes = Array((src_nodes[end]+1):(2*max_strands))
-	dst = src
+	n_locus_nodes = nv(g)
+	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + 2*max_strands))
+	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + 2*max_strands))
+	add_vertices!(g, 4*max_strands)
+	println("ne(g): ", ne(g))
 	for i in 1:n_locus_nodes
-		add_edge!(g, src, i)
-		add_edge!(g, i, dst)
+		for src in src_nodes
+			@assert add_edge!(g, src, i)
+		end
+		for dst in dst_nodes
+			@assert add_edge!(g, i, dst)
+		end
 	end
 
 	model = Model(GLPK.Optimizer)
@@ -220,31 +232,46 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@variable(model, x[g_edges], Bin, container=SparseAxisArray)
 	#@variable(model, allele[1:(n_locus_nodes+4*max_strands), 1:max_strands], Bin)
 	@variable(model, allele[1:(n_locus_nodes + 4*max_strands + 1), 1:max_strands], Bin)
-
+	@variable(model, edge_allele[1:length(g_locus_edges),1:max_strands], Bin)
 
 	# We set constraints to ensure that 
 
 	#each node can have no more than one allele
-	@constraint(model, sum(allele, dims=2) <= 1)
+	#@constraint(model, sum(allele, dims=2) .<= 1)
 
 	#set the src and dst node alleles
 	for _allele in 1:max_strands, nodes in [src_nodes, dst_nodes], node in nodes
-		@constraint(model, allele[node, _allele] <= 1)
-		@constraint(model, 1 <= allele[node, _allele])
+		#@constraint(model, allele[node, _allele] <= 1)
+		#@constraint(model, 1 <= allele[node, _allele])
 	end
 
-	#src and dst can have at most 2*max_strands edges
-	@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= max_strands*2)
-	@constraint(model, sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= max_strands*2)
+	#src and dst can have at most 1 edge
+	#@constraint(model, [src in src_nodes], sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= 1)
+	for src in src_nodes
+		@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= 1)
+	end
+	@constraint(model, [dst in dst_nodes], sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# each node must have the same allele as its parents
-	@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
+	#@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
+	#@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
 
 	# each node must have the same allele as its children
-	@constraint(model, [i = 1:n_locus_nodes[], nbr in outneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
-	
+	for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
+		#@constraint(model, (x[(i,nbr)]-1) .<= allele[i,:] - allele[nbr,:])
+		#@constraint(model, allele[i,:] - allele[nbr,:] .<= (1-x[(i,nbr)]))
+	end
+
 	# a locus node has no parents, it has no allele
-	@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
+	#@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
+
+	# an edge has the same allele as its parent node
+	"""
+	for (i, edge) in enumerate(g_locus_edges)
+		@constraint(model, allele[edge[1],:] .<= edge_allele[i,:])
+		@constraint(model, edge_allele[i,:] .<= allele[edge[1],:])
+	end
+	"""
 
 	# locus nodes have the same number of incoming and outgoing edges
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g, i)))
@@ -254,25 +281,52 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 2)
 
 	# no locus node can be connected to more than three other locus nodes
-	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
+	#@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
 
 	# each src node can have at most one outgoing edge
-	@constraint(model, [src in src_nodes], sum(x[src, nbr] for nbr in 1:locus_nodes) <= 1)
+	for src in src_nodes
+		#println("length(outneighbors(g, src)): ", length(outneighbors(g, src)))
+		#println("src: $src")
+		#println(1 in outneighbors(g, src))
+		#@constraint(model, [src in src_nodes], sum(x[src, nbr] for nbr in 1:n_locus_nodes) <= 1)
+		@constraint(model, sum(x[(src, nbr)] for nbr in 1:n_locus_nodes) <= 1)
+	end
 
 	# each dst node can have at most one incoming edge 
-	@constraint(model, [dst in dst_nodes], sum(x[nbr, dst] for nbr in 1:locus_nodes) <= 1)
+	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in 1:n_locus_nodes) <= 1)
 
 	# the null node does not have an allele (used for later constraint)
-	@constraint(model, sum(allele[end,:]) <= 0)
+	#@constraint(model, sum(allele[end,:]) <= 0)
 
 	# the two src nodes for an allele cannot start separate strands
-	null_allele_node = n_locus_nodes + 4*max_strands + 1
-	ind_diff = null_allele_node - 1:n_locus_nodes
+	#null_allele_node = n_locus_nodes + 4*max_strands + 1
+	#ind_diff = null_allele_node .- Array(1:n_locus_nodes)
 	#@constraint(model, [s in 1:max_strands], sum(allele[:, s]) ? sum(x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes)])
-	num_locus_edges(s) = sum(x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes)
-	num_edges_from_src_node(src) = sum(x(src,i) for i in 1:n_locus_nodes)
-	num_strand_src_edges(s) = num_edges_from_src_node(n_locus_nodes + 2*src-1) + num_edges_from_src_node(n_locus_nodes + 2*src)
-	@constraint(model, [s in 1:max_strands], sum(allele[:, s]) + num_strand_src_edges(s) <= num_locus_edges(s))
+	#num_locus_edges(s) = sum([x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes])
+	"""
+	println("size(allele): ", size(allele))
+	println("size(inddiff): ", size(ind_diff))
+	function num_locus_edges(s)
+		edge_bools = []
+		sizehint!(edge_bools, n_locus_nodes)
+		for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes
+			println("typeof(allele[j,s]): ", typeof(allele[j,s]))
+			push!(edge_bools, x[(i, null_allele_node - ind_diff[j]*allele[j,s])])
+		end
+		return sum(edge_bools)
+	end
+	"""
+	num_edges_from_src_node(src) = sum(x[(src,i)] for i in 1:n_locus_nodes)
+	num_strand_src_edges(src :: Int64) = num_edges_from_src_node(n_locus_nodes + 2*src-1) + num_edges_from_src_node(n_locus_nodes + 2*src)
+	#@constraint(model, [s in 1:max_strands], sum(allele[:, s]) + num_strand_src_edges(s) <= num_locus_edges(s))
+	#for s in 1:max_strands
+		#@constraint(model, sum(allele[:, s]) + num_strand_src_edges(s) <= sum(x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes))
+	#end
+	nsrc_edges = num_strand_src_edges.(Array(1:max_strands))'
+	println("nsrc_edges: ", size(nsrc_edges))
+	println(size(sum(allele, dims=1)))
+	println(size(sum(edge_allele, dims=1)))
+	#@constraint(model, sum(allele, dims=1) .+ nsrc_edges .<= sum(edge_allele, dims=1))
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges))
 
@@ -281,7 +335,8 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	evals = value.(x)
 	gres = DiGraph(n_locus_nodes)
 	for e in g_edges
-		evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
+		#evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
+		evals[e] == 1 ? add_edge!(gres, e) : nothing
 	end
 
 	wccs = weakly_connected_components(gres)
