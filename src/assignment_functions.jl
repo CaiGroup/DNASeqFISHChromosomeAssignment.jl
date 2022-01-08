@@ -134,16 +134,17 @@ function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :
 	#wcc_gs, wcc_Ws, wccs = get_connected_components(g2, W2)
 	wccs = weakly_connected_components(g2)
 	allele = fill(-1, nrow(chrm))
+	ldps = []
 	for wcc in wccs
-		println("nv(g2): ", nv(g2))
-		println("nrow(chrm): ", nrow(chrm))
-		println("size(wcc): ", size(wcc))
-		println("size(allele): ", size(allele))
-		wcc_ldps, wcc_allele = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
-		println("size(wcc_alele): ", size(wcc_allele))
-		
-		allele[wcc] .= wcc_allele
+		if length(wcc) >= min_size
+			wcc_ldps, wcc_allele = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
+			allele[wcc] .= wcc_allele
+			for wcc_ldp in wcc_ldps
+				push!(ldps, wcc_ldp)
+			end
+		end
 	end
+	ldps, allele
 end
 
 function get_neighbors(chr, r, sig)
