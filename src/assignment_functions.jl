@@ -238,12 +238,14 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	# We set constraints to ensure that 
 
 	#each node can have no more than one allele
-	#@constraint(model, sum(allele, dims=2) .<= 1)
+	@constraint(model, sum(allele, dims=2) .<= 1)
 
 	#set the src and dst node alleles
-	for _allele in 1:max_strands, nodes in [src_nodes, dst_nodes], node in nodes
-		@constraint(model, allele[node, _allele] <= 1)
-		@constraint(model, 1 <= allele[node, _allele])
+	for _allele in 1:max_strands
+		for i in 1:2, nodes in [src_nodes, dst_nodes]
+			@constraint(model, allele[nodes[2*(_allele-1)+i], _allele] <= 1)
+			@constraint(model, 1 <= allele[nodes[2*(_allele-1)+i], _allele])
+		end
 	end
 
 	#src and dst can have at most 1 edge
