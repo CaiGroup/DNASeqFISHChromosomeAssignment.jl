@@ -254,8 +254,8 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [dst in dst_nodes], sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# each node must have the same allele as its parents
-	#@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
-	#@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
+	@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
+	@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
 
 	# each node must have the same allele as its children
 	for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
