@@ -173,7 +173,8 @@ function get_neighbors(chr, r, sig)
         # add outgoing edges to genomically down stream spatial neighbors
         for nbr in nbrs
             if chr[nbr,"g"] > chr[locus,"g"]
-                genomic_weight = max_locus - (chr[nbr,"g"] - chr[locus,"g"])
+                #genomic_weight = max_locus - (chr[nbr,"g"] - chr[locus,"g"])
+				genomic_weight = 1/abs(chr[nbr,"g"] - chr[locus,"g"])
                 spatial_weight = exp(-((chr[locus,"x"] - chr[nbr,"x"])^2 +
                                        (chr[locus,"y"] - chr[nbr,"y"])^2 +
                                        (chr[locus,"z"] - chr[nbr,"z"])^2)/(2 * sig^2))
@@ -216,6 +217,7 @@ end
 #function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
 function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
 	n_locus_nodes = nv(g)
+	n_nodes = n_locus_nodes + 4*max_strands
 	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + 2*max_strands))
 	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + 2*max_strands))
 	add_vertices!(g, 4*max_strands)
@@ -237,8 +239,8 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	g_locus_edges = filter(e -> e[1] <= n_locus_nodes && e[2] <= n_locus_nodes, g_edges)
 
 	@variable(model, x[g_edges], Bin, container=SparseAxisArray)
-	#@variable(model, allele[1:(n_locus_nodes+4*max_strands), 1:max_strands], Bin)
-	@variable(model, allele[1:(n_locus_nodes + 4*max_strands + 1), 1:max_strands], Bin)
+	@variable(model, allele[1:(n_locus_nodes+4*max_strands), 1:max_strands], Bin)
+	#@variable(model, allele[1:(n_locus_nodes + 4*max_strands + 1), 1:max_strands], Bin)
 	@variable(model, edge_allele[1:length(g_locus_edges),1:max_strands], Bin)
 
 	# We set constraints to ensure that 
@@ -262,11 +264,12 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [dst in dst_nodes], sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# each node must have the same allele as its parents
-	@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
-	@constraint(model, [i = 1:n_locus_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
+	@constraint(model, [i = 1:n_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
+	@constraint(model, [i = 1:n_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
 
 	# each node must have the same allele as its children
-	for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
+	#for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
+	for i in 1:n_nodes, nbr in outneighbors(g, i)
 		@constraint(model, (x[(i,nbr)]-1) .<= allele[i,:] - allele[nbr,:])
 		@constraint(model, allele[i,:] - allele[nbr,:] .<= (1-x[(i,nbr)]))
 	end
@@ -275,11 +278,10 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
 
 	# an edge has the same allele as its parent node
-	
-	for (i, edge) in enumerate(g_locus_edges)
-		@constraint(model, allele[edge[1],:] .<= edge_allele[i,:])
-		@constraint(model, edge_allele[i,:] .<= allele[edge[1],:])
-	end
+	#for (i, edge) in enumerate(g_locus_edges)
+		#@constraint(model, allele[edge[1],:] .<= edge_allele[i,:])
+		#@constraint(model, edge_allele[i,:] .<= allele[edge[1],:])
+	#end
 	
 
 	# locus nodes have the same number of incoming and outgoing edges
@@ -287,7 +289,7 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	# locus nodes may have no more than 2 incoming or outgoing edges
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) <= 2)
-	@constraint(model, [i = 1:n_locus_nodes], sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 2)
+	#@constraint(model, [i = 1:n_locus_nodes], sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 2)
 
 	# no locus node can be connected to more than three other locus nodes
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
@@ -299,9 +301,6 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	# each dst node can have at most one incoming edge 
 	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in 1:n_locus_nodes) <= 1)
-
-	# the null node does not have an allele (used for later constraint)
-	@constraint(model, sum(allele[end,:]) <= 0)
 
 	# the two src nodes for an allele cannot start separate strands
 	num_edges_from_src_node(src) = sum(x[(src,i)] for i in 1:n_locus_nodes)
