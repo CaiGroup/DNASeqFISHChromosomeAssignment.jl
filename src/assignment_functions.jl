@@ -39,9 +39,9 @@ Arguments
 	- fov : the field of view in which locus was imaged
 	- cellID : the cell in which the locus was imaged
 	- chrom : chromosome on which locus is located
-	- x : x spatial coordinate of locus
-	- y : y spatial coordinate of locus
-	- z : z spatial coordinate of locus
+	- x : x spatial coordinate of locus (Must be Floats)
+	- y : y spatial coordinate of locus (Must be Floats)
+	- z : z spatial coordinate of locus (Must be Floats)
 	- g : genomic coordinate of locus
 - `search_radius` : gives how far in space to search for neighboring loci on the same
 chromosome strand for each locus.
@@ -106,6 +106,12 @@ function assign_chromosomes(pnts :: DataFrame,
 							ldp_overlap_thresh :: Float64 = 0.99)
 
 	@assert min_size > 1
+	if nrow(pnts) > 1
+		@assert typeof(pnts.x) == Vector{Float64}
+		@assert typeof(pnts.y) == Vector{Float64}
+		@assert typeof(pnts.z) == Vector{Float64}
+	end
+
 	sort!(pnts, [:fov, :cellID, :chrom, :g])
 	chrms = groupby(pnts,[:fov, :cellID, :chrom])
 	assn_chrms(chrm) = assign_loci(chrm, search_radius, sigma, max_strands, min_size, dbscan, dbscan_min_pnts, ldp_overlap_thresh)
@@ -261,20 +267,20 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	# each node must have the same allele as its children
 	for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
-		#@constraint(model, (x[(i,nbr)]-1) .<= allele[i,:] - allele[nbr,:])
-		#@constraint(model, allele[i,:] - allele[nbr,:] .<= (1-x[(i,nbr)]))
+		@constraint(model, (x[(i,nbr)]-1) .<= allele[i,:] - allele[nbr,:])
+		@constraint(model, allele[i,:] - allele[nbr,:] .<= (1-x[(i,nbr)]))
 	end
 
 	# a locus node has no parents, it has no allele
-	#@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
+	@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
 
 	# an edge has the same allele as its parent node
-	"""
+	
 	for (i, edge) in enumerate(g_locus_edges)
 		@constraint(model, allele[edge[1],:] .<= edge_allele[i,:])
 		@constraint(model, edge_allele[i,:] .<= allele[edge[1],:])
 	end
-	"""
+	
 
 	# locus nodes have the same number of incoming and outgoing edges
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g, i)))
@@ -284,14 +290,10 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 2)
 
 	# no locus node can be connected to more than three other locus nodes
-	#@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
+	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
 
 	# each src node can have at most one outgoing edge
 	for src in src_nodes
-		#println("length(outneighbors(g, src)): ", length(outneighbors(g, src)))
-		#println("src: $src")
-		#println(1 in outneighbors(g, src))
-		#@constraint(model, [src in src_nodes], sum(x[src, nbr] for nbr in 1:n_locus_nodes) <= 1)
 		@constraint(model, sum(x[(src, nbr)] for nbr in 1:n_locus_nodes) <= 1)
 	end
 
@@ -299,37 +301,16 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in 1:n_locus_nodes) <= 1)
 
 	# the null node does not have an allele (used for later constraint)
-	#@constraint(model, sum(allele[end,:]) <= 0)
+	@constraint(model, sum(allele[end,:]) <= 0)
 
 	# the two src nodes for an allele cannot start separate strands
-	#null_allele_node = n_locus_nodes + 4*max_strands + 1
-	#ind_diff = null_allele_node .- Array(1:n_locus_nodes)
-	#@constraint(model, [s in 1:max_strands], sum(allele[:, s]) ? sum(x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes)])
-	#num_locus_edges(s) = sum([x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes])
-	"""
-	println("size(allele): ", size(allele))
-	println("size(inddiff): ", size(ind_diff))
-	function num_locus_edges(s)
-		edge_bools = []
-		sizehint!(edge_bools, n_locus_nodes)
-		for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes
-			println("typeof(allele[j,s]): ", typeof(allele[j,s]))
-			push!(edge_bools, x[(i, null_allele_node - ind_diff[j]*allele[j,s])])
-		end
-		return sum(edge_bools)
-	end
-	"""
 	num_edges_from_src_node(src) = sum(x[(src,i)] for i in 1:n_locus_nodes)
 	num_strand_src_edges(src :: Int64) = num_edges_from_src_node(n_locus_nodes + 2*src-1) + num_edges_from_src_node(n_locus_nodes + 2*src)
-	#@constraint(model, [s in 1:max_strands], sum(allele[:, s]) + num_strand_src_edges(s) <= num_locus_edges(s))
-	#for s in 1:max_strands
-		#@constraint(model, sum(allele[:, s]) + num_strand_src_edges(s) <= sum(x[(i, null_allele_node - ind_diff[j]*allele[j,s])] for i in 1:n_locus_nodes, j in (i+1):n_locus_nodes))
-	#end
 	nsrc_edges = num_strand_src_edges.(Array(1:max_strands))'
 	println("nsrc_edges: ", size(nsrc_edges))
 	println(size(sum(allele, dims=1)))
 	println(size(sum(edge_allele, dims=1)))
-	#@constraint(model, sum(allele, dims=1) .+ nsrc_edges .<= sum(edge_allele, dims=1))
+	@constraint(model, sum(allele, dims=1) .+ nsrc_edges .<= sum(edge_allele, dims=1))
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges))
 
