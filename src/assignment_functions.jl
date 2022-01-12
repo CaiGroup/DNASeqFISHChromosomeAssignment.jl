@@ -222,8 +222,8 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + nbranches*max_strands))
 	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + nbranches*max_strands))
 	add_vertices!(g, 2*nbranches*max_strands)
-	println("ne(g): ", ne(g))
 	imag_edges = []
+	g_locus_only = copy(g)
 	for i in 1:n_locus_nodes
 		for src in src_nodes
 			@assert add_edge!(g, src, i)
@@ -301,7 +301,7 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	#@constraint(model, [i = 1:n_locus_nodes], sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 2)
 
 	# no locus node can be connected to more than three other locus nodes
-	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g, i)) <= 3)
+	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g_locus_only, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g_locus_only, i)) <= 3)
 
 	# each src node can have at most one outgoing edge
 	for src in src_nodes
@@ -318,31 +318,13 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	optimize!(model)
 
-	
-
 	evals = value.(x)
 	
-	_n_edges_from_src(src) = sum(evals[(src,i)] for i in 1:n_locus_nodes)
-	_n_strand_src_edges(src :: Int64) = _n_edges_from_src(n_locus_nodes + nbranches*src-1) + _n_edges_from_src(n_locus_nodes + nbranches*src)
-	src_edges = n_strand_src_edges.(Array(1:max_strands))'
-	println("sum allele: ", sum(value.(allele[1:n_locus_nodes,:]), dims=1))
-	println("sum edge_allele: ", sum(value.(edge_allele), dims=1))
-	println("edge_allele: ")
-	println(value.(edge_allele))
 	gres = DiGraph(n_locus_nodes)
 	for e in g_edges
 		#evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
 		evals[e] == 1 ? add_edge!(gres, e) : nothing
 	end
-	println("x: ")
-	println(value.(x))
-	println("allele: ")
-	println(value.(allele))
-	println(collect(edges(gres)))
-	println("ne(gres): ", ne(gres))
-	println()
-	println("sum alleles: ", sum(value.(allele)[1:n_locus_nodes,:],dims=1))
-	println("sum edge alleles: ", sum(value.(edge_allele),dims=1))
 
 	wccs = weakly_connected_components(gres)
 
