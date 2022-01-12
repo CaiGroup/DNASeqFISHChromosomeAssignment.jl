@@ -286,6 +286,12 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	# if a locus node has no parents, it has no allele
 	@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
 	
+	# an edge has the same allele as its parent node if the edge is active, no allele otherwise
+ 	for (i, edge) in enumerate(g_locus_edges)
+ 		@constraint(model, allele[edge[1],:] .+ (x[edge] - 1) .<= edge_allele[i,:])
+ 		@constraint(model, edge_allele[i,:] .<= allele[edge[1],:] .+ (1 - x[edge]))
+		@constraint(model, edge_allele[i, :] .<= x[edge])
+ 	end
 
 	# locus nodes have the same number of incoming and outgoing edges
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g, i)))
@@ -306,21 +312,23 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in 1:n_locus_nodes) <= 1)
 
 	# the two src nodes for an allele cannot start separate strands
-	"""
-	n_edges_from_src(src) = sum(x[(src,i)] for i in 1:n_locus_nodes)
-	n_strand_src_edges(src :: Int64) = n_edges_from_src(n_locus_nodes + nbranches*src-1) + n_edges_from_src(n_locus_nodes + nbranches*src)
-	nsrc_edges = n_strand_src_edges.(Array(1:max_strands))'
-	println("nsrc_edges: ", size(nsrc_edges))
-	println(size(sum(allele, dims=1)))
-	println(size(sum(edge_allele, dims=1)))
-	@constraint(model, sum(allele, dims=1) .+ nsrc_edges .<= sum(edge_allele, dims=1))
-	"""
+	@constraint(model, sum(allele[1:n_locus_nodes,:], dims=1) .<= sum(edge_allele, dims=1) .+ 1)
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - sum(x[e] for e in imag_edges))
 
 	optimize!(model)
 
+	
+
 	evals = value.(x)
+	
+	_n_edges_from_src(src) = sum(evals[(src,i)] for i in 1:n_locus_nodes)
+	_n_strand_src_edges(src :: Int64) = _n_edges_from_src(n_locus_nodes + nbranches*src-1) + _n_edges_from_src(n_locus_nodes + nbranches*src)
+	src_edges = n_strand_src_edges.(Array(1:max_strands))'
+	println("sum allele: ", sum(value.(allele[1:n_locus_nodes,:]), dims=1))
+	println("sum edge_allele: ", sum(value.(edge_allele), dims=1))
+	println("edge_allele: ")
+	println(value.(edge_allele))
 	gres = DiGraph(n_locus_nodes)
 	for e in g_edges
 		#evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
@@ -328,7 +336,13 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	end
 	println("x: ")
 	println(value.(x))
-	println("edges: ", collect(edges(gres)))
+	println("allele: ")
+	println(value.(allele))
+	println(collect(edges(gres)))
+	println("ne(gres): ", ne(gres))
+	println()
+	println("sum alleles: ", sum(value.(allele)[1:n_locus_nodes,:],dims=1))
+	println("sum edge alleles: ", sum(value.(edge_allele),dims=1))
 
 	wccs = weakly_connected_components(gres)
 
