@@ -4,7 +4,7 @@ using Test
 
 # make simple test "chromosome"
 
-nloci = 20
+nloci = 11
 
 main = DataFrame(
     Dict(
@@ -46,6 +46,29 @@ main2 = copy(main)
 
 main2.x = main2.x .+ 7.5
 
+branched[!,"loc_id"] = fill(1, nrow(branched))
+main2[!,"loc_id"] .= fill(2, nrow(main2)) 
+
 multi = vcat(branched, main2)
 
-res3 = assign_chromosomes(multi, 5.0, 1.5, 4, 2, false)
+res3 = assign_chromosomes(multi, 5.0, 1.5, 2, 2, false)
+
+m2_alleles = unique(res3[res3.x .== 12.5, "ldp_allele"])
+
+b_alleles = unique(res3[res3.x .!= 12.5, "ldp_allele"])
+
+@test length(m2_alleles) == 1 && -1 ∉ m2_alleles
+@test length(b_alleles) == 1 && -1 ∉ b_alleles
+@test m2_alleles[1] != b_alleles[1]
+
+sc2 = copy(branch)
+
+sc2[!,"loc_id"] = fill(3, nrow(sc2))
+
+sc2.y .-= 50
+
+multi2 = vcat(multi,sc2)
+
+res4 = assign_chromosomes(multi2, 5.0, 1.5, 2, 2, false)
+
+@test all(res4.loc_id .== res4.ldp_allele)

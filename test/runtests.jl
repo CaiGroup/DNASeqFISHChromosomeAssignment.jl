@@ -6,11 +6,20 @@ using Test
 
 #close_chrms = DataFrame(CSV.File("test/close_chroms.csv"))
 #far_chrms = DataFrame(CSV.File("test/far_chroms.csv"))
+
+
+@testset "Simulated Chromosomes"  begin
+    include("simpletest.jl")
+end
+
+
 close_chrms = DataFrame(CSV.File("close_chroms.csv"))
 far_chrms = DataFrame(CSV.File("far_chroms.csv"))
 
-r = 1500
-sig = 750
+#r = 1500
+#sig = 750
+r = 3000
+sig = 1500
 max_paths = 2
 
 res = assign_chromosomes(far_chrms, r, sig, max_paths)

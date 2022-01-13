@@ -5,6 +5,7 @@ using Graphs
 using SparseArrays
 using GLPK
 using Clustering
+using SCIP
 
 """
 	assign_chromosomes(pnts :: DataFrame,
@@ -144,6 +145,8 @@ function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :
 	for wcc in wccs
 		if length(wcc) >= min_size
 			wcc_ldps, wcc_allele = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
+			max_allele_so_far = maximum([maximum(allele), 0])
+			wcc_allele[wcc_allele .> -1] .+= max_allele_so_far
 			allele[wcc] .= wcc_allele
 			for wcc_ldp in wcc_ldps
 				push!(ldps, wcc_ldp)
@@ -221,21 +224,29 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	n_nodes = n_locus_nodes + 2*nbranches*max_strands
 	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + nbranches*max_strands))
 	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + nbranches*max_strands))
+	println("nv(g): ", nv(g))
+	println("ne(g): ", ne(g))
 	add_vertices!(g, 2*nbranches*max_strands)
 	imag_edges = []
 	g_locus_only = copy(g)
+	
 	for i in 1:n_locus_nodes
-		for src in src_nodes
-			@assert add_edge!(g, src, i)
-			push!(imag_edges, (src, i))
-		end
-		for dst in dst_nodes
-			@assert add_edge!(g, i, dst)
-			push!(imag_edges, (i, dst))
+		if length(outneighbors(g,i)) > length(inneighbors(g,i))
+			for src in src_nodes
+				@assert add_edge!(g, src, i)
+				push!(imag_edges, (src, i))
+			end
+		elseif length(outneighbors(g,i)) < length(inneighbors(g,i))
+			for dst in dst_nodes
+				@assert add_edge!(g, i, dst)
+				push!(imag_edges, (i, dst))
+			end
 		end
 	end
+	println("ne(g_1): ", ne(g))
 
 	model = Model(GLPK.Optimizer)
+	#model = Model(SCIP.Optimizer)
 	#A2 = Graphs.LinAlg.adjacency_matrix(g)
 	#rows, cols, vals = findnz(A2)
 
@@ -305,16 +316,40 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	# each src node can have at most one outgoing edge
 	for src in src_nodes
-		@constraint(model, sum(x[(src, nbr)] for nbr in 1:n_locus_nodes) <= 1)
+		@constraint(model, sum(x[(src, nbr)] for nbr in outneighbors(g, src)) <= 1)
 	end
 
 	# each dst node can have at most one incoming edge 
-	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in 1:n_locus_nodes) <= 1)
+	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# the two src nodes for an allele cannot start separate strands
 	@constraint(model, sum(allele[1:n_locus_nodes,:], dims=1) .<= sum(edge_allele, dims=1) .+ 1)
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - sum(x[e] for e in imag_edges))
+
+	function my_callback_function(cb_data)
+		println("callback:")
+		#x_vals = callback_value.(Ref(cb_data), x)
+		#status = MOI.submit(model, MOI.HeuristicSolution(cb_data), x, round.(x_vals))
+		vars = []
+		sols = []
+		#sizehint!(vars, ne(g))
+		#sizehint!(sols, ne(g))
+		for e in g_locus_edges
+			x_val = callback_value(cb_data, x[e])
+			#push!(vars, x[e])
+			#push!(sols, round(x_val))
+			if x_val ∉ [0.0, 1.0]
+				println(e, ": ", x_val, "; w: ", W[e...])
+			end
+		end
+		#status = MOI.submit(
+        	#model, MOI.HeuristicSolution(cb_data), vars, sols
+    	#)
+		#println("HeuristicSolution Status: ", status)
+	end
+
+	MOI.set(model, MOI.HeuristicCallback(), my_callback_function)
 
 	optimize!(model)
 
