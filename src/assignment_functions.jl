@@ -221,12 +221,15 @@ end
 function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
 	nbranches = 2
 	n_locus_nodes = nv(g)
-	n_nodes = n_locus_nodes + 2*nbranches*max_strands
-	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + nbranches*max_strands))
-	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + nbranches*max_strands))
+	n_nodes = n_locus_nodes + 2 #*nbranches*max_strands
+	
+	#src = n_locus_nodes + 1
+	#dst = n_locus_nodes + 2
+	src_nodes = Array((n_locus_nodes+1):(n_locus_nodes + max_strands))
+	dst_nodes = Array((src_nodes[end]+1):(src_nodes[end] + max_strands))
 	println("nv(g): ", nv(g))
 	println("ne(g): ", ne(g))
-	add_vertices!(g, 2*nbranches*max_strands)
+	add_vertices!(g, 2max_strands)
 	imag_edges = []
 	g_locus_only = copy(g)
 	
@@ -254,9 +257,21 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	g_locus_edges = filter(e -> e[1] <= n_locus_nodes && e[2] <= n_locus_nodes, g_edges)
 
 	@variable(model, x[g_edges], Bin, container=SparseAxisArray)
-	@variable(model, allele[1:(n_locus_nodes+2*nbranches*max_strands), 1:max_strands], Bin)
+	@variable(model, allele[1:(n_locus_nodes+nbranches*max_strands), 1:max_strands], Bin)
 	#@variable(model, allele[1:(n_locus_nodes + 4*max_strands + 1), 1:max_strands], Bin)
-	@variable(model, edge_allele[1:length(g_locus_edges),1:max_strands], Bin)
+	#@variable(model, edge_allele[1:length(g_locus_edges),1:max_strands], Bin)
+	@variable(model, net_imag_edges[1:length(imag_edges), 1:max_strands], Int)
+	@constraint(model, 0 .<= net_imag_edges .<= 2)
+
+	"""
+	im_e_v(im_e) = im_e[1] in src_nodes ? allele[im_e[2], :] : -allele[im_e[1], :]
+	@constraint(model, net_imag_edges[1,:] .== allele[imag_edges[1][2], :])
+	#for (i, edge) in enumerate(imag_edges[2:end])
+	for i in 2:length(imag_edges)
+		@constraint(model, net_imag_edges[i, :] .== net_imag_edges[i-1, :] .+ im_e_v(imag_edges[i]))
+	end
+	"""
+
 
 	# We set constraints to ensure that 
 
@@ -265,23 +280,18 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	#set the src and dst node alleles
 	for _allele in 1:max_strands
-		for i in 1:nbranches, nodes in [src_nodes, dst_nodes]
-		#for i in 1:1, nodes in [src_nodes, dst_nodes]
-			#@constraint(model, allele[nodes[2*(_allele-1)+i], _allele] <= 1)
-			@constraint(model, 1 <= allele[nodes[nbranches*(_allele-1)+i], _allele])
+		#for i in 1:nbranches, nodes in [src_nodes, dst_nodes]
+		for nodes in [src_nodes, dst_nodes]
+			@constraint(model, 1 == allele[nodes[_allele], _allele])
 		end
 	end
 
 	#src and dst can have at most 1 edge
 	#@constraint(model, [src in src_nodes], sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= 1)
-	for src in src_nodes
-		@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= 1)
-	end
-	@constraint(model, [dst in dst_nodes], sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= 1)
-
-	# each node must have the same allele as its parents
-	#@constraint(model, [i = 1:n_nodes, nbr in inneighbors(g, i)], (x[(nbr,i)]-1) .<= allele[i,:] - allele[nbr,:])
-	#@constraint(model, [i = 1:n_nodes, nbr in inneighbors(g, i)], allele[i,:] - allele[nbr,:] .<= (1-x[(nbr,i)]))
+	#for src in src_nodes
+	#	@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g, src)) <= 1)
+	#end
+	#@constraint(model, [dst in dst_nodes], sum(x[(nbr,dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# each node must have the same allele as its children
 	for i in 1:n_locus_nodes, nbr in outneighbors(g, i)
@@ -298,11 +308,14 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(allele[i,:]) <= sum(x[(nbr, i)] for nbr in inneighbors(g, i)))
 	
 	# an edge has the same allele as its parent node if the edge is active, no allele otherwise
+	"""
  	for (i, edge) in enumerate(g_locus_edges)
  		@constraint(model, allele[edge[1],:] .+ (x[edge] - 1) .<= edge_allele[i,:])
  		@constraint(model, edge_allele[i,:] .<= allele[edge[1],:] .+ (1 - x[edge]))
 		@constraint(model, edge_allele[i, :] .<= x[edge])
  	end
+	 """
+	
 
 	# locus nodes have the same number of incoming and outgoing edges
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g, i)))
@@ -315,34 +328,34 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	@constraint(model, [i = 1:n_locus_nodes], sum(x[(nbr,i)] for nbr in inneighbors(g_locus_only, i)) + sum(x[(i,nbr)] for nbr in outneighbors(g_locus_only, i)) <= 3)
 
 	# each src node can have at most one outgoing edge
-	for src in src_nodes
-		@constraint(model, sum(x[(src, nbr)] for nbr in outneighbors(g, src)) <= 1)
-	end
+	#for src in src_nodes
+		#@constraint(model, sum(x[(src, nbr)] for nbr in outneighbors(g, src)) <= 1)
+	#end
 
 	# each dst node can have at most one incoming edge 
-	@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in inneighbors(g, dst)) <= 1)
+	#@constraint(model, [dst in dst_nodes], sum(x[(nbr, dst)] for nbr in inneighbors(g, dst)) <= 1)
 
 	# the two src nodes for an allele cannot start separate strands
-	@constraint(model, sum(allele[1:n_locus_nodes,:], dims=1) .<= sum(edge_allele, dims=1) .+ 1)
+	#@constraint(model, sum(allele[1:n_locus_nodes,:], dims=1) .<= sum(edge_allele, dims=1) .+ 1)
 
-	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - sum(x[e] for e in imag_edges))
+	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - 0.5sum(x[e] for e in imag_edges))
 
 	function my_callback_function(cb_data)
-		println("callback:")
+		print("c")
 		#x_vals = callback_value.(Ref(cb_data), x)
 		#status = MOI.submit(model, MOI.HeuristicSolution(cb_data), x, round.(x_vals))
-		vars = []
-		sols = []
+		#vars = []
+		#sols = []
 		#sizehint!(vars, ne(g))
 		#sizehint!(sols, ne(g))
-		for e in g_locus_edges
-			x_val = callback_value(cb_data, x[e])
+		#for e in g_locus_edges
+			#x_val = callback_value(cb_data, x[e])
 			#push!(vars, x[e])
 			#push!(sols, round(x_val))
-			if x_val ∉ [0.0, 1.0]
-				println(e, ": ", x_val, "; w: ", W[e...])
-			end
-		end
+			#if x_val ∉ [0.0, 1.0]
+				#println(e, ": ", x_val, "; w: ", W[e...])
+			#end
+		#end
 		#status = MOI.submit(
         	#model, MOI.HeuristicSolution(cb_data), vars, sols
     	#)
@@ -354,11 +367,21 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	optimize!(model)
 
 	evals = value.(x)
+
+	println("imag alleles:")
+	println(value.(allele)[(n_locus_nodes+1):end,:])
+	println("alleles:")
+	println(value.(allele)[1:n_locus_nodes,:])
+
+	println("net_imag_edges: ")
+	println(value.(net_imag_edges))
+	println("edges: ")
 	
 	gres = DiGraph(n_locus_nodes)
 	for e in g_edges
 		#evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
 		evals[e] == 1 ? add_edge!(gres, e) : nothing
+		if (evals[e] == 1) print(e) end
 	end
 
 	wccs = weakly_connected_components(gres)
