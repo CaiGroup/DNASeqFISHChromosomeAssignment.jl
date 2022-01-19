@@ -5,7 +5,9 @@ using Graphs
 using SparseArrays
 using GLPK
 using Clustering
-using SCIP
+#using SCIP
+using CPLEX
+using Plots
 
 """
 	assign_chromosomes(pnts :: DataFrame,
@@ -124,8 +126,8 @@ end
 function assign_loci(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64, dbscan, dbscan_min_pnts, ldp_overlap_thresh)
 	#chrm = sort(_chrm, :g)
 	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
-	ldps, ldp_allele = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
-	return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
+	ldps, ldp_allele, parents, children = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
+	return_df = DataFrame(Dict("ldp_allele"=>ldp_allele, "parents"=>parents,"children"=>children))
 	if dbscan
 		dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r, dbscan_min_pnts, min_size)
 		return_df[!, "dbscan_allele"] = get_allele_col(chrm, dbscan_clusters)
@@ -141,19 +143,28 @@ function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :
 	#wcc_gs, wcc_Ws, wccs = get_connected_components(g2, W2)
 	wccs = weakly_connected_components(g2)
 	allele = fill(-1, nrow(chrm))
+	parents = fill(Int64[], nrow(chrm))
+	children = fill(Int64[], nrow(chrm))
 	ldps = []
+	#gs = []
+	nodes = Array(1:nv(g))
 	for wcc in wccs
 		if length(wcc) >= min_size
-			wcc_ldps, wcc_allele = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
+			wcc_ldps, wcc_allele, _wcc_parents, _wcc_children = optimize_paths(chrm[wcc,:], g2[wcc], W2[wcc,wcc], min_size, max_strands)
 			max_allele_so_far = maximum([maximum(allele), 0])
 			wcc_allele[wcc_allele .> -1] .+= max_allele_so_far
-			allele[wcc] .= wcc_allele
+			allele[wcc] .= wcc_allele# .+ max_allele_so_far
+			wcc_parents = [nodes[wcc][p] for p in _wcc_parents]
+			wcc_children = [nodes[wcc][c] for c in _wcc_children]
+			parents[wcc] .= wcc_parents
+			children[wcc] .= wcc_children
+			#push!(gs, gres)
 			for wcc_ldp in wcc_ldps
 				push!(ldps, wcc_ldp)
 			end
 		end
 	end
-	ldps, allele
+	ldps, allele, parents, children
 end
 
 function get_neighbors(chr, r, sig)
@@ -245,8 +256,9 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	end
 	println("ne(g_1): ", ne(g))
 
-	model = Model(GLPK.Optimizer)
+	#model = Model(GLPK.Optimizer)
 	#model = Model(SCIP.Optimizer)
+	model = Model(CPLEX.Optimizer)
 	#A2 = Graphs.LinAlg.adjacency_matrix(g)
 	#rows, cols, vals = findnz(A2)
 
@@ -327,30 +339,6 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - sum(x[e] for e in imag_edges))
 
-	function my_callback_function(cb_data)
-		println("callback:")
-		#x_vals = callback_value.(Ref(cb_data), x)
-		#status = MOI.submit(model, MOI.HeuristicSolution(cb_data), x, round.(x_vals))
-		vars = []
-		sols = []
-		#sizehint!(vars, ne(g))
-		#sizehint!(sols, ne(g))
-		for e in g_locus_edges
-			x_val = callback_value(cb_data, x[e])
-			#push!(vars, x[e])
-			#push!(sols, round(x_val))
-			if x_val ∉ [0.0, 1.0]
-				println(e, ": ", x_val, "; w: ", W[e...])
-			end
-		end
-		#status = MOI.submit(
-        	#model, MOI.HeuristicSolution(cb_data), vars, sols
-    	#)
-		#println("HeuristicSolution Status: ", status)
-	end
-
-	MOI.set(model, MOI.HeuristicCallback(), my_callback_function)
-
 	optimize!(model)
 
 	evals = value.(x)
@@ -361,6 +349,13 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 		evals[e] == 1 ? add_edge!(gres, e) : nothing
 	end
 
+	in_edges = []
+	out_edges = []
+	for i in 1:nv(gres)
+		push!(in_edges, inneighbors(gres, i))
+		push!(out_edges, outneighbors(gres, i))
+	end
+
 	wccs = weakly_connected_components(gres)
 
 	lccs = length.(wccs)
@@ -368,7 +363,7 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	allele = get_allele_col(chrm, ldps)
 
-	return ldps, allele
+	return ldps, allele, in_edges, out_edges
 end
 
 function get_allele_col(chrm, grps)
@@ -400,7 +395,7 @@ function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overla
 	accepted = zeros(Bool, size(intersections)...)
 
 	#check whether the cluster agreement passes the threshold
-	for ldp_ind in 1:max_strands
+	for ldp_ind in 1:length(ldps)#max_strands
 	    accepted[ldp_ind, :] = (intersection_sizes[ldp_ind,:]./length(ldps[ldp_ind]) .> ldp_overlap_thresh)
 	end
 
@@ -421,4 +416,25 @@ function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overla
 		allele = get_allele_col(chrm, ldps)
 	end
 	return allele
+end
+
+function plot_chrom(df, cell, chrm)
+	chrm_str = "chr" * string(chrm)
+	pnts = filter(row -> row.chrom == chrm_str, filter(row -> row.cellID == cell, df))
+	#scatter(pnts.x, pnts.y, marker_z=pnts.g)
+	alleles = unique(pnts.final_allele)
+	filter!(a -> a != -1, alleles)
+	for a in alleles
+		apnts = pnts[pnts.final_allele .== a, :]
+		for apnt in eachrow(apnts)
+			children = apnt.children
+			for child in children
+				println("child: $child")
+				xs = [apnt.x, pnts[child,"x"]]
+				ys = [apnt.y, pnts[child,"y"]]
+				println(xs)
+				plot!(xs, ys, color=a)
+			end
+		end
+	end
 end
