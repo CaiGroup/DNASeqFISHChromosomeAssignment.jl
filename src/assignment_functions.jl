@@ -243,11 +243,13 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 	
 	for i in 1:n_locus_nodes
 		if length(outneighbors(g,i)) > length(inneighbors(g,i))
+			# | 1 < length(outneighbors(g,i))
 			for src in src_nodes
 				@assert add_edge!(g, src, i)
 				push!(imag_edges, (src, i))
 			end
 		elseif length(outneighbors(g,i)) < length(inneighbors(g,i))
+			#| 1 < length(inneighbors(g,i))
 			for dst in dst_nodes
 				@assert add_edge!(g, i, dst)
 				push!(imag_edges, (i, dst))
@@ -336,6 +338,20 @@ function optimize_paths(chrm, g:: DiGraph, W :: SparseMatrixCSC, min_size :: Int
 
 	# the two src nodes for an allele cannot start separate strands
 	@constraint(model, sum(allele[1:n_locus_nodes,:], dims=1) .<= sum(edge_allele, dims=1) .+ 1)
+
+	"""
+	# if any loci are assigned to an allele, there must be at least min_size loci assigned to it
+	@variable(model, any_assigned[1:max_strands], Bin)
+	@constraint(model, any_assigned' .<= sum(allele, dims=1))
+	@constraint(model, sum(allele, dims=1) .<= size(allele)[1] .* any_assigned')
+
+	@variable(model, gt_min_size[1:max_strands], Bin)
+	@constraint(model, min_size .* gt_min_size' .<= sum(allele, dims=1))
+	@constraint(model, sum(allele, dims=1) .- (min_size + 1) .<= size(allele)[1] .* gt_min_size')
+
+	@constraint(model, gt_min_size .+ (1 .- any_assigned) .== 1)
+	"""
+	
 
 	@objective(model, Max, sum(x[e]*W[e...] for e in g_locus_edges) - sum(x[e] for e in imag_edges))
 

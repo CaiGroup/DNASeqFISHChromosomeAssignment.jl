@@ -18,7 +18,8 @@ main = DataFrame(
     )
 )
 
-res1 = assign_chromosomes(main, 5.0, 1.5, 4, 2, false)
+res0 = assign_chromosomes(main, 5.0, 1.5, 2, 100, false)
+res1 = assign_chromosomes(main, 5.0, 1.5, 2, 2, false)
 
 res1_alleles = unique(res1.ldp_allele)
 @test length(res1_alleles) == 1 && -1 ∉ res1_alleles
@@ -37,7 +38,7 @@ branch = DataFrame(
 
 branched = vcat(main, branch)
 
-res2 = assign_chromosomes(branched, 5.0, 1.5, 4, 2, false)
+res2 = assign_chromosomes(branched, 5.0, 1.5, 2, 2, false)
 
 res2_alleles = unique(res2.ldp_allele)
 @test length(res2_alleles) == 1 && -1 ∉ res2_alleles
