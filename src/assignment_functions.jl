@@ -1,7 +1,7 @@
 using DataFrames
 using JuMP
 using NearestNeighbors
-using LightGraphs
+using Graphs
 using SparseArrays
 using GLPK
 using Clustering
@@ -204,10 +204,10 @@ function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, 
 	end
 
 	model = Model(GLPK.Optimizer)
-	#A2 = LightGraphs.LinAlg.adjacency_matrix(g2)
+	#A2 = Graphs.LinAlg.adjacency_matrix(g2)
 	#rows, cols, vals = findnz(A2)
 
-	g2_edges = Tuple.(collect(LightGraphs.edges(g2)))
+	g2_edges = Tuple.(collect(Graphs.edges(g2)))
 	g2_locus_edges = filter(e -> e[1] <= nv(g) && e[2] <= nv(g), g2_edges)
 
 	@variable(model, x[g2_edges], Bin, container=SparseAxisArray)
