@@ -154,7 +154,8 @@ function get_neighbors(chr, r, sig)
         # add outgoing edges to genomically down stream spatial neighbors
         for nbr in nbrs
             if chr[nbr,"g"] > chr[locus,"g"]
-                genomic_weight = max_locus - (chr[nbr,"g"] - chr[locus,"g"])
+                #genomic_weight = max_locus - (chr[nbr,"g"] - chr[locus,"g"])
+				genomic_weight = 1/(abs(chr[nbr,"g"] - chr[locus,"g"]))
                 spatial_weight = exp(-((chr[locus,"x"] - chr[nbr,"x"])^2 +
                                        (chr[locus,"y"] - chr[nbr,"y"])^2 +
                                        (chr[locus,"z"] - chr[nbr,"z"])^2)/(2 * sig^2))
