@@ -129,7 +129,7 @@ function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size
 			if length(ldps) == 2
 				println("found 2 ldps")
 				ldp_allele[ldps[1]] .= i
-				ldp_allele[ldps[2]] .= (maximum(dbscan_allele) + 1)
+				ldp_allele[ldps[2]] .= (maximum(final_allele) + 1)
 				final_allele[c] .= ldp_allele
 			end
 		end
