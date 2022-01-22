@@ -142,9 +142,10 @@ end
 
 function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64)
 	A, W, g = @time get_neighbors(chrm, r, sig)
-	R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
-	g2, W2 = @time rule_out_edges(A, W, WR)
-	return @time optimize_paths(chrm, g, g2, W2, min_size, max_strands)
+	#R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
+	#g2, W2 = @time rule_out_edges(A, W, WR)
+	#return @time optimize_paths(chrm, g, g2, W2, min_size, max_strands)
+	return @time optimize_paths(chrm, g, W, min_size, max_strands)
 end
 
 function get_neighbors(chr, r, sig)
@@ -234,6 +235,55 @@ function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, 
 	evals = value.(x)
 	gres = DiGraph(nv(g))
 	for e in g2_edges
+		evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
+	end
+
+	wccs = weakly_connected_components(gres)
+
+	lccs = length.(wccs)
+	ldps = wccs[lccs .>= min_size]
+
+	allele = get_allele_col(chrm, ldps)
+
+	return ldps, allele
+end
+
+function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
+	nloci = nv(g)
+	src = nloci+1
+	dst = src+1
+	locus_edges =Tuple.(collect(Graphs.edges(g)))
+	add_vertices!(g, 2)
+	for i in 1:nloci
+		add_edge!(g, src, i)
+		add_edge!(g, i, dst)
+	end
+
+	#model = Model(GLPK.Optimizer)
+	model = Model(CPLEX.Optimizer)
+	#A2 = Graphs.LinAlg.adjacency_matrix(g2)
+	#rows, cols, vals = findnz(A2)
+
+	g_edges = Tuple.(collect(Graphs.edges(g)))
+	#g2_locus_edges = filter(e -> e[1] <= nloci && e[2] <= nloci, g2_edges)
+	#println("g_edges")
+	#println(g_edges)
+	println("nloci: $nloci")
+	println("nv(g): ", nv(g))
+
+	@variable(model, x[g_edges], Bin, container=SparseAxisArray)
+	@constraint(model, sum(x[(src,nbr)] for nbr in 1:nloci) <= max_strands)
+	@constraint(model, sum(x[(nbr,dst)] for nbr in 1:nloci) <= max_strands)
+	@constraint(model, [i = 1:nloci], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g, i)))
+	@constraint(model, [i = 1:nloci], sum(x[(nbr,i)] for nbr in inneighbors(g, i)) <= 1)
+
+	@objective(model, Max, sum(x[e]*W[e...] for e in locus_edges))
+
+	optimize!(model)
+
+	evals = value.(x)
+	gres = DiGraph(nloci)
+	for e in locus_edges
 		evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
 	end
 
