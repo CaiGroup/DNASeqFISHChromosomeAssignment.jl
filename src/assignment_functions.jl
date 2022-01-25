@@ -140,6 +140,33 @@ function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size
 	return return_df
 end
 
+function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_inc :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, overlap_thresh)
+	#chrm = sort(_chrm, :g)
+	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
+	#dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
+	dbscan_clusters = scan_DBSCAN_radius(chrm, dbscan_min_pnts, min_size, r_dbscan_min, r_dbscan_max, r_dbscan_inc, overlap_thresh)
+	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
+	final_allele = copy(dbscan_allele)
+	for (i, c) in enumerate(dbscan_clusters)
+		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
+		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
+			"starting ldp"
+			tangled_chrms = chrm[c, :]
+			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size)
+			if length(ldps) == 2
+				println("found 2 ldps")
+				ldp_allele[ldps[1]] .= i
+				ldp_allele[ldps[2]] .= (maximum(final_allele) + 1)
+				final_allele[c] .= ldp_allele
+			end
+		end
+	end
+	#ldps, ldp_allele = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
+	#return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
+	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "final_allele"=>final_allele))
+	return return_df
+end
+
 function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64)
 	A, W, g = @time get_neighbors(chrm, r, sig)
 	#R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
@@ -311,6 +338,46 @@ function cluster_chromosomes_DBSCAN(chrms, radius, min_neighbors, min_size)
 	dbscan_clusters = [sort(vcat(dbc.core_indices,  dbc.boundary_indices)) for dbc in dbr]
 	return dbscan_clusters
 end
+
+function scan_DBSCAN_radius(chrms, min_neighbors, min_size, rad_min, rad_max, rad_inc, overlap_thresh)
+	old_clusters = []
+	for r in rad_min:rad_inc:rad_max
+		clusters = cluster_chromosomes_DBSCAN(chrms, r, min_neighbors, min_size)
+		subsets = [old ⊆ new for old in old_clusters, new in clusters]
+		if prod(size(subsets)) > 0 
+			nsubsets = sum(subsets, dims=1)
+			merged_subsets = subsets[:,[i for i in 1:length(nsubsets) if nsubsets[i] >1]]
+		else
+			merged_subsets = Matrix(undef,0, 0)
+		end
+		
+
+		#check for overlaps
+		println("size(merged_subsets): ", size(merged_subsets))
+		println("length(clusters): ", length(clusters))
+		println()
+		for i in 1:size(merged_subsets)[2]
+			#merged_clusters = clusters[[j for j in 1:length(merged_subsets[:,i]) if merged_subsets[j,i]]]
+			merged_clusters = [old_clusters[j] for j in 1:length(old_clusters) if merged_subsets[j,i]]
+			if length(merged_clusters) > 1
+				println(length(merged_clusters))
+				merged_clusters_g = [chrms.g[c] for c in merged_clusters]
+				println(length(merged_clusters_g))
+
+				c_gte_l = [c1l >= c2l for c1l in merged_clusters_g[1], c2l in merged_clusters_g[2]]
+				ngt = sum(c_gte_l)
+				npairs = prod(size(c_gte_l))
+				overlap_score = ngt/npairs
+				if overlap_score > overlap_thresh && (1-overlap_thresh) < overlap_score
+					return old_clusters
+				end
+			end
+		end
+		old_clusters = copy(clusters)
+	end
+	return old_clusters
+end
+
 
 #function reconcile_LDP_DBSCAN(ldp_allele, dbscan_clusters)
 function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overlap_thresh)
