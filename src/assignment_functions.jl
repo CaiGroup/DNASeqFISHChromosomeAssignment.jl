@@ -5,7 +5,7 @@ using Graphs
 using SparseArrays
 using GLPK
 using Clustering
-using CPLEX
+#using CPLEX
 
 """
 	assign_chromosomes(pnts :: DataFrame,
@@ -103,18 +103,19 @@ function assign_chromosomes(pnts :: DataFrame,
 							sigma :: Real,
 							min_size :: Int64 = 100,
 							min_prop_unique :: Float64 = 0.9,
-							dbscan_min_pnts :: Int64 = 10)
+							dbscan_min_pnts :: Int64 = 10,
+							optimizer = GLPK.Optimizer)
 
 	@assert min_size > 1
 	sort!(pnts, [:fov, :cellID, :chrom, :g])
 	chrms = groupby(pnts,[:fov, :cellID, :chrom])
-	assn_chrms(chrm) = assign_loci(chrm, r_dbscan, r_ldp, sigma, min_size, min_prop_unique, dbscan_min_pnts)
+	assn_chrms(chrm) = assign_loci(chrm, r_dbscan, r_ldp, sigma, min_size, min_prop_unique, dbscan_min_pnts, optimizer)
 	res = transform(assn_chrms, chrms)
 	#renamed_col = combine(res, Not(:x1), :x1 => :allele)
 	return res #renamed_col
 end
 
-function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts)
+function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, optimizer=GLPK.Optimizer)
 	#chrm = sort(_chrm, :g)
 	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
 	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
@@ -125,7 +126,7 @@ function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
 			"starting ldp"
 			tangled_chrms = chrm[c, :]
-			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size)
+			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size, optimizer)
 			if length(ldps) == 2
 				println("found 2 ldps")
 				ldp_allele[ldps[1]] .= i
@@ -140,7 +141,7 @@ function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size
 	return return_df
 end
 
-function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_inc :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, overlap_thresh)
+function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_inc :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, overlap_thresh, optimizer)
 	#chrm = sort(_chrm, :g)
 	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
 	#dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
@@ -152,7 +153,7 @@ function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
 			"starting ldp"
 			tangled_chrms = chrm[c, :]
-			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size)
+			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size, optimizer)
 			if length(ldps) == 2
 				println("found 2 ldps")
 				ldp_allele[ldps[1]] .= i
@@ -167,12 +168,12 @@ function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_
 	return return_df
 end
 
-function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64)
+function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64, optimizer)
 	A, W, g = @time get_neighbors(chrm, r, sig)
 	#R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
 	#g2, W2 = @time rule_out_edges(A, W, WR)
 	#return @time optimize_paths(chrm, g, g2, W2, min_size, max_strands)
-	return @time optimize_paths(chrm, g, W, min_size, max_strands)
+	return @time optimize_paths(chrm, g, W, min_size, max_strands, optimizer)
 end
 
 function get_neighbors(chr, r, sig)
@@ -233,7 +234,7 @@ function rule_out_edges(A, W, WR)
     return g2, W2
 end
 
-function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
+function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64, model)
 	src = nv(g)+1
 	dst = src+1
 	for i in 1:nv(g2)
@@ -242,7 +243,7 @@ function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, 
 	end
 
 	#model = Model(GLPK.Optimizer)
-	model = Model(CPLEX.Optimizer)
+	#model = Model(CPLEX.Optimizer)
 	#A2 = Graphs.LinAlg.adjacency_matrix(g2)
 	#rows, cols, vals = findnz(A2)
 
@@ -275,7 +276,7 @@ function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, 
 	return ldps, allele
 end
 
-function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64)
+function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64, optimizer)
 	nloci = nv(g)
 	src = nloci+1
 	dst = src+1
@@ -285,9 +286,9 @@ function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: In
 		add_edge!(g, src, i)
 		add_edge!(g, i, dst)
 	end
-
+	model = Model(optimizer)
 	#model = Model(GLPK.Optimizer)
-	model = Model(CPLEX.Optimizer)
+	#model = Model(CPLEX.Optimizer)
 	#A2 = Graphs.LinAlg.adjacency_matrix(g2)
 	#rows, cols, vals = findnz(A2)
 
@@ -320,6 +321,8 @@ function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: In
 	ldps = wccs[lccs .>= min_size]
 
 	allele = get_allele_col(chrm, ldps)
+
+	println("length(ldps): ", length(ldps))
 
 	return ldps, allele
 end
