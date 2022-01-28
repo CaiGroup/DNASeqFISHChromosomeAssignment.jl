@@ -5,7 +5,6 @@ using Graphs
 using SparseArrays
 using GLPK
 using Clustering
-#using CPLEX
 
 """
 	assign_chromosomes(pnts :: DataFrame,
@@ -101,6 +100,7 @@ function assign_chromosomes(pnts :: DataFrame,
 	 						r_dbscan :: Real,
 							r_ldp :: Real, 
 							sigma :: Real,
+							r_ldp_nbr :: Real,
 							min_size :: Int64 = 100,
 							min_prop_unique :: Float64 = 0.9,
 							dbscan_min_pnts :: Int64 = 10,
@@ -109,32 +109,23 @@ function assign_chromosomes(pnts :: DataFrame,
 	@assert min_size > 1
 	sort!(pnts, [:fov, :cellID, :chrom, :g])
 	chrms = groupby(pnts,[:fov, :cellID, :chrom])
-	assn_chrms(chrm) = assign_loci(chrm, r_dbscan, r_ldp, sigma, min_size, min_prop_unique, dbscan_min_pnts, optimizer)
+	assn_chrms(chrm) = assign_loci(chrm, r_dbscan, r_ldp, sigma, r_ldp_nbr, min_size, min_prop_unique, dbscan_min_pnts, optimizer)
 	res = transform(assn_chrms, chrms)
 	#renamed_col = combine(res, Not(:x1), :x1 => :allele)
 	return res #renamed_col
 end
 
-function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, optimizer=GLPK.Optimizer)
+function assign_loci(chrm, r_dbscan :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, r_ldp_nbr, min_prop_unique, dbscan_min_pnts, optimizer=GLPK.Optimizer)
 	#chrm = sort(_chrm, :g)
 	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
 	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
 	final_allele = copy(dbscan_allele)
-	for (i, c) in enumerate(dbscan_clusters)
-		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
-		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
-			"starting ldp"
-			tangled_chrms = chrm[c, :]
-			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size, optimizer)
-			if length(ldps) == 2
-				println("found 2 ldps")
-				ldp_allele[ldps[1]] .= i
-				ldp_allele[ldps[2]] .= (maximum(final_allele) + 1)
-				final_allele[c] .= ldp_allele
-			end
-		end
-	end
+
+	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, min_prop_unique, r_ldp, sig, r_ldp_nbr, min_size, optimizer)
+
+	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
+	
 	#ldps, ldp_allele = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
 	#return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
 	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "final_allele"=>final_allele))
@@ -147,24 +138,10 @@ function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_
 	#dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
 	dbscan_clusters = scan_DBSCAN_radius(chrm, dbscan_min_pnts, min_size, r_dbscan_min, r_dbscan_max, r_dbscan_inc, overlap_thresh)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
-	final_allele = copy(dbscan_allele)
-	for (i, c) in enumerate(dbscan_clusters)
-		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
-		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
-			"starting ldp"
-			tangled_chrms = chrm[c, :]
-			ldps, ldp_allele = find_longest_disjoint_paths(tangled_chrms, r_ldp, sig, 2, min_size, optimizer)
-			if length(ldps) == 2
-				println("found 2 ldps")
-				ldp_allele[ldps[1]] .= i
-				ldp_allele[ldps[2]] .= (maximum(final_allele) + 1)
-				final_allele[c] .= ldp_allele
-			end
-		end
-	end
-	#ldps, ldp_allele = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
-	#return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
-	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "final_allele"=>final_allele))
+
+	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, min_prop_unique, r_ldp, sig, r_ldp_nbr, min_size, optimizer)
+
+	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
 	return return_df
 end
 
@@ -287,8 +264,6 @@ function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: In
 		add_edge!(g, i, dst)
 	end
 	model = Model(optimizer)
-	#model = Model(GLPK.Optimizer)
-	#model = Model(CPLEX.Optimizer)
 	#A2 = Graphs.LinAlg.adjacency_matrix(g2)
 	#rows, cols, vals = findnz(A2)
 
@@ -381,6 +356,57 @@ function scan_DBSCAN_radius(chrms, min_neighbors, min_size, rad_min, rad_max, ra
 	return old_clusters
 end
 
+
+"""
+Get a strict Longest dijsoint path or two for every DBSCAN cluster. When two LDPs are found, also group points near each ldp
+"""
+function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, min_prop_unique, r_ldp, sig, r_ldp_nbr, min_size, optimizer)
+	dbscan_ldp_allele = copy(dbscan_allele)
+	dbscan_ldp_nbr_allele = copy(dbscan_allele)
+	for (i, c) in enumerate(dbscan_clusters)
+		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
+		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
+			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 2, min_size, optimizer)
+			dbscan_c_ldp_allele[ldps[1]] .= i
+			ldp_allele_nums = [-1, i]
+			if length(ldps) == 2
+				push!(ldp_allele_nums, maximum(dbscan_ldp_allele) + 1)
+				dbscan_c_ldp_allele[ldps[2]] .= (maximum(final_allele) + 1)
+			end
+			dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
+			dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
+			dbscan_ldp_nbr_allele = assign_ldp_neighbors!(chrm[c,:], dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
+		else
+			dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
+ 			ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 1, min_size, optimizer)
+			dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][ldp[1]]
+
+		end
+	end
+	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
+end
+
+"""
+The longest disjoint leaves many points unassigned that do not fit into the path. These points may be replication sites, or
+otherwise legitimate. This function counts how many points within a given radius of each unassigned locus are in each
+of the longest disjoint paths, and assigned the points to the same allele as the longest disjoint path with the most
+loci in that radius.
+"""
+function assign_ldp_neighbors!(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
+	# make KDTrees of loci assigned to each allele
+	ldp_trees = [KDTree(pnts[ldp,:]) for ldp in ldps]
+	unassigned_rows = filter(l -> l ∉ vcat(ldps...), Array(1:nrow(pnts)))
+	unassinged_loci = pnts[unassigned_rows, :]
+	unassigned_coords = Array([unassinged_loci.x unassinged_loci.y unassinged_loci.z]')
+	n_allele_nbrs = zeros(length(unassigned_loci), length(ldp_allele_nums))
+	for (i, ldp_tree) in enumerate(ldp_trees)
+		n_allele_nbrs[:, i + 1] .= length.(inrange(ldp_tree, unassigned_coords, r))
+	end
+	
+	ldp_nbr_allele = broadcast(x -> allele_nums[x], getindex.(argmax(n_allele_nbrs, dims=2),2))
+	
+	dbscan_ldp_nbr_allele[unassigned_rows] .= ldp_nbr_allele 
+end
 
 #function reconcile_LDP_DBSCAN(ldp_allele, dbscan_clusters)
 function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overlap_thresh)
