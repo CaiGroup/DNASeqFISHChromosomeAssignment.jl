@@ -145,10 +145,11 @@ end
 
 function find_longest_disjoint_paths(chrm, r :: Real, sig :: Real, max_strands :: Int64, min_size :: Int64, optimizer)
 	A, W, g = @time get_neighbors(chrm, r, sig)
-	#R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
-	#g2, W2 = @time rule_out_edges(A, W, WR)
+	R, WR = @time get_trans_red_w(chrm, r, sig, A, W, g)
+	g2, W2 = @time rule_out_edges(A, W, WR)
 	#return @time optimize_paths(chrm, g, g2, W2, min_size, max_strands)
-	return @time optimize_paths(chrm, g, W, min_size, max_strands, optimizer)
+	return @time optimize_paths(chrm, g2, W2, min_size, max_strands, optimizer)
+	#return @time optimize_paths(chrm, g, W, min_size, max_strands, optimizer)
 end
 
 function get_neighbors(chr, r, sig)
@@ -197,7 +198,8 @@ end
 
 function rule_out_edges(A, W, WR)
     nnodes = size(A)[1]
-    A2 = spzeros(nnodes+2, nnodes+2)
+    #A2 = spzeros(nnodes+2, nnodes+2)
+	A2 = spzeros(nnodes, nnodes)
     W2 = spzeros(size(A)...)
     for i in 1:nnodes
         min_weight_reduced_arc = isempty(nonzeros(WR[i,:])) ? 0.0 : minimum(nonzeros(WR[i,:]))
@@ -365,21 +367,28 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
 			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 2, min_size, optimizer)
-			dbscan_c_ldp_allele[ldps[1]] .= i
-			ldp_allele_nums = [-1, i]
-			if length(ldps) == 2
-				second_allele_num = maximum([maximum(dbscan_ldp_allele), i]) + 1
-				push!(ldp_allele_nums, second_allele_num)
-				dbscan_c_ldp_allele[ldps[2]] .= second_allele_num
+			if length(ldps) > 0
+				dbscan_c_ldp_allele[ldps[1]] .= i
+				ldp_allele_nums = [-1, i]
+				if length(ldps) == 2
+					second_allele_num = maximum([maximum(dbscan_ldp_allele), i]) + 1
+					push!(ldp_allele_nums, second_allele_num)
+					dbscan_c_ldp_allele[ldps[2]] .= second_allele_num
+				end
+				dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
+				dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
+				assign_ldp_neighbors!(chrm[c,:], dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
+			else
+				println("No LDPs: ")
+				println(ldps)
+				dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
 			end
-			dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
-			dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
-			assign_ldp_neighbors!(chrm[c,:], dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
 		else
 			dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
  			ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 1, min_size, optimizer)
-			dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][ldp[1]]
-
+			if length(ldp) > 0
+				dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][ldp[1]]
+			end
 		end
 	end
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
@@ -394,14 +403,16 @@ loci in that radius.
 function assign_ldp_neighbors!(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
 	# make KDTrees of loci assigned to each allele
 	ldp_trees = [KDTree(Array(pnts[ldp,["x","y","z"]])') for ldp in ldps]
-	unassigned_rows = filter(l -> l ∉ vcat(ldps...), Array(1:nrow(pnts)))
+	assigned_loci = sort(vcat(ldps...))
+	@assert maximum(assigned_loci) <= nrow(pnts)
+	unassigned_rows = filter(locus -> locus ∉ assigned_loci, Array(1:nrow(pnts)))
 	unassigned_loci = pnts[unassigned_rows, :]
 	unassigned_coords = Array([unassigned_loci.x unassigned_loci.y unassigned_loci.z]')
 	n_allele_nbrs = zeros(nrow(unassigned_loci), length(ldp_allele_nums))
 	for (i, ldp_tree) in enumerate(ldp_trees)
 		n_allele_nbrs[:, i + 1] .= length.(inrange(ldp_tree, unassigned_coords, r))
 	end
-	
+
 	ldp_nbr_allele = broadcast(x -> ldp_allele_nums[x], getindex.(argmax(n_allele_nbrs, dims=2),2))
 	ldp_nbr_allele = reshape(ldp_nbr_allele, length(ldp_nbr_allele))
 	
