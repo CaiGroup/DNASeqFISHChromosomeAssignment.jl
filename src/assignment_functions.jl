@@ -311,6 +311,9 @@ function get_allele_col(chrm, grps)
 end
 
 function cluster_chromosomes_DBSCAN(chrms, radius, min_neighbors, min_size)
+	if nrow(chrms) <= 3
+		return []
+	end
 	points = Array([chrms.x chrms.y chrms.z]')
 	dbr = dbscan(points, radius, min_neighbors=min_neighbors, min_cluster_size=min_size)
 	dbscan_clusters = [sort(vcat(dbc.core_indices,  dbc.boundary_indices)) for dbc in dbr]
