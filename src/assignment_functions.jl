@@ -380,7 +380,7 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 				end
 				dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
 				dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
-				assign_ldp_neighbors!(chrm[c,:], dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
+				dbscan_ldp_nbr_allele[c] = assign_ldp_neighbors(chrm[c,:], dbscan_ldp_nbr_allele[c], ldps, r_ldp_nbr, ldp_allele_nums)
 			else
 				println("No LDPs: ")
 				println(ldps)
@@ -390,7 +390,10 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 			dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
  			ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 1, min_size, optimizer)
 			if length(ldp) > 0
-				dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][ldp[1]]
+				#dbscan_c_ldp_allele[ldp[1]] .= i
+				#dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
+				#dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][1] #dbscan_allele[c][ldp[1]]
+				dbscan_ldp_allele[c[ldp[1]]] .= i
 			end
 		end
 	end
@@ -403,9 +406,9 @@ otherwise legitimate. This function counts how many points within a given radius
 of the longest disjoint paths, and assigned the points to the same allele as the longest disjoint path with the most
 loci in that radius.
 """
-function assign_ldp_neighbors!(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
+function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
 	# make KDTrees of loci assigned to each allele
-	ldp_trees = [KDTree(Array(pnts[ldp,["x","y","z"]])') for ldp in ldps]
+	ldp_trees = [KDTree(Array(Array(pnts[ldp,["x","y","z"]])')) for ldp in ldps]
 	assigned_loci = sort(vcat(ldps...))
 	@assert maximum(assigned_loci) <= nrow(pnts)
 	unassigned_rows = filter(locus -> locus ∉ assigned_loci, Array(1:nrow(pnts)))
@@ -420,6 +423,7 @@ function assign_ldp_neighbors!(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_
 	ldp_nbr_allele = reshape(ldp_nbr_allele, length(ldp_nbr_allele))
 	
 	dbscan_ldp_nbr_allele[unassigned_rows] .= ldp_nbr_allele 
+	return dbscan_ldp_nbr_allele
 end
 
 #function reconcile_LDP_DBSCAN(ldp_allele, dbscan_clusters)
