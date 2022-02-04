@@ -5,6 +5,7 @@ using Graphs
 using SparseArrays
 using GLPK
 using Clustering
+using Statistics
 
 """
 	assign_chromosomes(pnts :: DataFrame,
@@ -370,7 +371,7 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 	ldp_allele_nums = vcat([-1], Array(1:length(dbscan_clusters)))
 	for (i, c) in enumerate(dbscan_clusters)
 		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
-		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
+		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique && mean_g_nbr_spat_dist(chrm[c,:]) > r_ldp
 			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 2, min_size, optimizer)
 			if length(ldps) > 0
 				#dbscan_c_ldp_allele[ldps[1]] .= i
@@ -403,6 +404,14 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
 	dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, r_ldp_nbr, ldp_allele_nums)
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
+end
+
+function mean_g_nbr_spat_dist(loci)
+	nrows = nrow(loci)
+    dists = Array(loci[2:end,["x","y","z"]] .- loci[1:(nrows-1),["x","y","z"]])
+	dists .^= 2
+	mean_dist = mean(sqrt.(sum(dists, dims=2)))
+	return mean_dist
 end
 
 """
