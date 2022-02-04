@@ -367,7 +367,7 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 	dbscan_ldp_allele = fill(-1, nrow(chrm)) #copy(dbscan_allele)
 	dbscan_ldp_nbr_allele = fill(-1, nrow(chrm)) ## copy(dbscan_allele)
 	n_new_alleles = 0
-	ldp_allele_nums = vcat([-1], [1:length(dbscan_clusters)])
+	ldp_allele_nums = vcat([-1], Array(1:length(dbscan_clusters)))
 	for (i, c) in enumerate(dbscan_clusters)
 		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
@@ -375,6 +375,7 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 			if length(ldps) > 0
 				#dbscan_c_ldp_allele[ldps[1]] .= i
 				dbscan_ldp_allele[c[ldps[1]]] .= i #dbscan_c_ldp_allele
+				dbscan_ldp_nbr_allele[c[ldps[1]]] .= i
 				#ldp_allele_nums = [-1, i]
 				if length(ldps) == 2
 					n_new_alleles += 1
@@ -382,9 +383,10 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 					println("new_allele: $new_allele")
 					push!(ldp_allele_nums, new_allele)
 					dbscan_ldp_allele[c[ldps[2]]] .= new_allele
+					dbscan_ldp_nbr_allele[c[ldps[2]]] .= new_allele
 				end
 				#dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
-				dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
+				#dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
 			else
 				println("No LDPs: ")
 				println(ldps)
@@ -399,7 +401,7 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 		end
 	end
 	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
-	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, r_ldp_nbr, ldp_allele_nums)
+	dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, r_ldp_nbr, ldp_allele_nums)
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
 end
 
@@ -412,7 +414,7 @@ loci in that radius.
 #function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
 function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, r, ldp_allele_nums)
 	# make KDTrees of loci assigned to each allele
-	cluster_nums = filter(c -> c != -1, unique(dbscan_ldp_nbr_allele))
+	cluster_nums = sort(filter(c -> c != -1, unique(dbscan_ldp_nbr_allele)))
 	#ldp_trees = [KDTree(Array(Array(pnts[ldp,["x","y","z"]])')) for ldp in ldps]
 	c_trees = [KDTree(Array(Array(pnts[dbscan_ldp_nbr_allele .== c,["x","y","z"]])')) for c in cluster_nums]
 	#assigned_loci = sort(vcat(ldps...))
@@ -435,7 +437,7 @@ function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, r, ldp_allele_nums)
 	#println("ldp_nbr_allele: ", ldp_nbr_allele)
 	#println("unassigned_loci: ", unassigned_loci)
 	#println("dbscan_ldp_nbr_allele: ", dbscan_ldp_nbr_allele)
-	#dbscan_ldp_nbr_allele[unassigned_loci] .= ldp_nbr_allele 
+	dbscan_ldp_nbr_allele[unassigned_loci] .= ldp_nbr_allele 
 	return dbscan_ldp_nbr_allele
 end
 
