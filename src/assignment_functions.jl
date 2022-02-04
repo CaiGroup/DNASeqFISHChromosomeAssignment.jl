@@ -366,21 +366,25 @@ Get a strict Longest dijsoint path or two for every DBSCAN cluster. When two LDP
 function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_unique, r_ldp, sig, r_ldp_nbr, min_size, optimizer)
 	dbscan_ldp_allele = fill(-1, nrow(chrm)) #copy(dbscan_allele)
 	dbscan_ldp_nbr_allele = fill(-1, nrow(chrm)) ## copy(dbscan_allele)
+	n_new_alleles = 0
+	ldp_allele_nums = vcat([-1], [1:length(dbscan_clusters)])
 	for (i, c) in enumerate(dbscan_clusters)
 		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < min_prop_unique
 			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 2, min_size, optimizer)
 			if length(ldps) > 0
-				dbscan_c_ldp_allele[ldps[1]] .= i
-				ldp_allele_nums = [-1, i]
+				#dbscan_c_ldp_allele[ldps[1]] .= i
+				dbscan_ldp_allele[c[ldps[1]]] .= i #dbscan_c_ldp_allele
+				#ldp_allele_nums = [-1, i]
 				if length(ldps) == 2
-					second_allele_num = maximum([maximum(dbscan_ldp_allele), i]) + 1
-					push!(ldp_allele_nums, second_allele_num)
-					dbscan_c_ldp_allele[ldps[2]] .= second_allele_num
+					n_new_alleles += 1
+					new_allele= length(dbscan_clusters) + n_new_alleles
+					println("new_allele: $new_allele")
+					push!(ldp_allele_nums, new_allele)
+					dbscan_ldp_allele[c[ldps[2]]] .= new_allele
 				end
-				dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
+				#dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
 				dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
-				dbscan_ldp_nbr_allele[c] = assign_ldp_neighbors(chrm[c,:], dbscan_ldp_nbr_allele[c], ldps, r_ldp_nbr, ldp_allele_nums)
 			else
 				println("No LDPs: ")
 				println(ldps)
@@ -390,13 +394,12 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_
 			dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
  			ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], r_ldp, sig, 1, min_size, optimizer)
 			if length(ldp) > 0
-				#dbscan_c_ldp_allele[ldp[1]] .= i
-				#dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
-				#dbscan_ldp_allele[c][ldp[1]] .= dbscan_allele[c][1] #dbscan_allele[c][ldp[1]]
 				dbscan_ldp_allele[c[ldp[1]]] .= i
 			end
 		end
 	end
+	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
+	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, r_ldp_nbr, ldp_allele_nums)
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
 end
 
@@ -406,23 +409,33 @@ otherwise legitimate. This function counts how many points within a given radius
 of the longest disjoint paths, and assigned the points to the same allele as the longest disjoint path with the most
 loci in that radius.
 """
-function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
+#function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
+function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, r, ldp_allele_nums)
 	# make KDTrees of loci assigned to each allele
-	ldp_trees = [KDTree(Array(Array(pnts[ldp,["x","y","z"]])')) for ldp in ldps]
-	assigned_loci = sort(vcat(ldps...))
-	@assert maximum(assigned_loci) <= nrow(pnts)
-	unassigned_rows = filter(locus -> locus ∉ assigned_loci, Array(1:nrow(pnts)))
-	unassigned_loci = pnts[unassigned_rows, :]
-	unassigned_coords = Array([unassigned_loci.x unassigned_loci.y unassigned_loci.z]')
-	n_allele_nbrs = zeros(nrow(unassigned_loci), length(ldp_allele_nums))
-	for (i, ldp_tree) in enumerate(ldp_trees)
-		n_allele_nbrs[:, i + 1] .= length.(inrange(ldp_tree, unassigned_coords, r))
+	cluster_nums = filter(c -> c != -1, unique(dbscan_ldp_nbr_allele))
+	#ldp_trees = [KDTree(Array(Array(pnts[ldp,["x","y","z"]])')) for ldp in ldps]
+	c_trees = [KDTree(Array(Array(pnts[dbscan_ldp_nbr_allele .== c,["x","y","z"]])')) for c in cluster_nums]
+	#assigned_loci = sort(vcat(ldps...))
+	#@assert maximum(assigned_loci) <= nrow(pnts)
+	unassigned_loci = filter(locus -> dbscan_ldp_nbr_allele[locus] == -1, Array(1:nrow(pnts)))
+	#unassigned_loci = pnts[unassigned_rows, :]
+	unassigned_coords = Array(Array(pnts[dbscan_ldp_nbr_allele .== -1, ["x","y","z"]])')
+	#unassigned_coords = Array([unassigned_loci.x unassigned_loci.y unassigned_loci.z]')
+	n_allele_nbrs = zeros(sum(dbscan_ldp_nbr_allele .== -1), length(ldp_allele_nums))
+	#for (i, ldp_tree) in enumerate(ldp_trees)
+		#n_allele_nbrs[:, i + 1] .= length.(inrange(ldp_tree, unassigned_coords, r))
+	#end
+	for (i, c_tree) in enumerate(c_trees)
+		n_allele_nbrs[:, i + 1] .= length.(inrange(c_tree, unassigned_coords, r))
 	end
 
 	ldp_nbr_allele = broadcast(x -> ldp_allele_nums[x], getindex.(argmax(n_allele_nbrs, dims=2),2))
 	ldp_nbr_allele = reshape(ldp_nbr_allele, length(ldp_nbr_allele))
 	
-	dbscan_ldp_nbr_allele[unassigned_rows] .= ldp_nbr_allele 
+	#println("ldp_nbr_allele: ", ldp_nbr_allele)
+	#println("unassigned_loci: ", unassigned_loci)
+	#println("dbscan_ldp_nbr_allele: ", dbscan_ldp_nbr_allele)
+	#dbscan_ldp_nbr_allele[unassigned_loci] .= ldp_nbr_allele 
 	return dbscan_ldp_nbr_allele
 end
 
