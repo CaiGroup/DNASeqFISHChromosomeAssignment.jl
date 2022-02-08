@@ -63,7 +63,6 @@ function assign_chromosomes(pnts :: DataFrame,
 end
 
 function assign_loci(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
-	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
 	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
 	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prms, optimizer)
