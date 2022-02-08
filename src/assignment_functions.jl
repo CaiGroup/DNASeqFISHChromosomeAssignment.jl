@@ -149,9 +149,6 @@ function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: In
 
 	g_edges = Tuple.(collect(Graphs.edges(g)))
 
-	println("nloci: $nloci")
-	println("nv(g): ", nv(g))
-
 	@variable(model, x[g_edges], Bin, container=SparseAxisArray)
 	@constraint(model, sum(x[(src,nbr)] for nbr in 1:nloci) <= max_strands)
 	@constraint(model, sum(x[(nbr,dst)] for nbr in 1:nloci) <= max_strands)
@@ -206,7 +203,6 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, opti
 	n_new_alleles = 0
 	ldp_allele_nums = vcat([-1], Array(1:length(dbscan_clusters)))
 	for (i, c) in enumerate(dbscan_clusters)
-		println("prop unique: ", length(unique(chrm.g[c]))/length(chrm.g[c]))
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < prm.min_prop_unique && mean_g_nbr_spat_dist(chrm[c,:]) > prm.r_ldp
 			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], prm, 2, optimizer)
 			if length(ldps) > 0
@@ -215,14 +211,11 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, opti
 				if length(ldps) == 2
 					n_new_alleles += 1
 					new_allele= length(dbscan_clusters) + n_new_alleles
-					println("new_allele: $new_allele")
 					push!(ldp_allele_nums, new_allele)
 					dbscan_ldp_allele[c[ldps[2]]] .= new_allele
 					dbscan_ldp_nbr_allele[c[ldps[2]]] .= new_allele
 				end
 			else
-				println("No LDPs: ")
-				println(ldps)
 				dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
 			end
 		else
