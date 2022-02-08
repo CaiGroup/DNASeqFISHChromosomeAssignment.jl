@@ -3,11 +3,8 @@ using DataFrames
 using DNASeqFISHChromosomeAssignment
 using SparseArrays
 using Test
-#using CPLEX
 
-#close_chrms = DataFrame(CSV.File("test/close_chroms.csv"))
-#far_chrms = DataFrame(CSV.File("test/far_chroms.csv"))
-close_chrms = DataFrame(CSV.File("close_chroms2.csv"))
+close_chrms = DataFrame(CSV.File("close_chroms.csv"))
 far_chrms = DataFrame(CSV.File("far_chroms.csv"))
 
 r = 1500
@@ -24,23 +21,15 @@ set_sigma(prms, 750)
 
 res = assign_chromosomes(far_chrms, prms)
 
-#ldp_not_classified = (res.ldp_allele .== -1)
-
 @testset "Far Chromosomes" begin
-    #@test all(ldp_final_eq .| ldp_n t_classified)
-    #@test all(sort(unique(res.ldp_allele)) .== [-1, 1, 2])
     @test all(res.dbscan_allele .== res.dbscan_ldp_nbr_allele)
     @test all(sort(unique(res.dbscan_ldp_nbr_allele)) .== [-1, 1, 2])
 end
 
-#res = assign_chromosomes(close_chrms, r, sig, max_paths)
 res = assign_chromosomes(close_chrms[:, ["fov", "cellID", "chrom", "x", "y", "z", "g"]], prms)
 
-
 @testset "Close Chromosomes" begin
-    #@test all(res.ldp_allele .== res.final_allele)
     @test all(close_chrms.dbscan_ldp_allele .== res.dbscan_ldp_allele)
-    #@test all(sort(unique(res.ldp_allele)) .== [-1, 1, 2])
     @test all(sort(unique(res.dbscan_ldp_nbr_allele)) .== [-1, 1, 2])
 end
 
