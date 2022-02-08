@@ -27,7 +27,4 @@ set_min_size(p :: ChromSepParams, min_size :: Real) = p.min_size = min_size
 
 set_dbscan_min_pnts(p :: ChromSepParams, mps :: Int64) = p.dbscan_min_pnts = mps
 
-set_r_ldp_nbr(p :: ChromSepParams, s :: Real) = p.sigma = s
-
-
 set_minProp_unique(p :: ChromSepParams, mpu :: Real) = p.min_prop_unique = mpu
