@@ -8,14 +8,7 @@ using Clustering
 using Statistics
 
 """
-	assign_chromosomes(pnts :: DataFrame,
-	 			search_radius :: Real,
-				sigma :: Real,
-				max_strands :: Int64,
-				min_size :: Int64 = 2,
-				dbscan :: Bool = true,
-				dbscan_min_pnts :: Int64 = 10,
-				ldp_overlap_thresh :: Float64 = 0.99)
+	assign_chromosomes(pnts :: DataFrame, params :: ChromSepParams, optimizer)
 
 This function assigns genomic loci from DNA seqFISH+ data to indiviual chromosomes using DBSCAN and Longest Disjoint Paths (LDP).
 LDP includes spatial and genomic information to effectely separate chromosome copies that are close to each other
@@ -44,14 +37,7 @@ Arguments
 	- y : y spatial coordinate of locus
 	- z : z spatial coordinate of locus
 	- g : genomic coordinate of locus
-- `search_radius` : gives how far in space to search for neighboring loci on the same
-chromosome strand for each locus.
-- `sigma` : defines the weight function for how much to penalize grouping adjacent genomic loci onto the the same chromosome based on their spatial distance from each other.
-- `max_strands` : the maximum number of copies of each chromosome that we expect to find.
-- `min_size` : the minimum acceptable number of loci on a strand.
-- `dbscan` : if true, run both DBSCAN and LDP, then find the consensus, else use only LDP.
-- `dbscan_min_pnts` : the minimum allowed number of points for a DBSCAN cluster. DBSCAN clusters with fewer points are discarded .
-- `ldp_overlap_thresh` : the minimum proportion of LDP assigned loci that DBSCAN assigned the same for the two clusters two be merged
+
 
 returns a copy of the input points sorted by fov, cellID, chrom, and g with a
 new column: `ldp_allele`. If the `dbscan` argument is true, also includes `dbscan_allele` and `final_allele` columns.
@@ -106,34 +92,14 @@ function assign_chromosomes(pnts :: DataFrame,
 	chrms = groupby(pnts,[:fov, :cellID, :chrom])
 	assn_chrms(chrm) = assign_loci(chrm, prms, optimizer)
 	res = transform(assn_chrms, chrms)
-	#renamed_col = combine(res, Not(:x1), :x1 => :allele)
-	return res #renamed_col
+	return res
 end
 
 function assign_loci(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
-	#chrm = sort(_chrm, :g)
 	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
-	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms) #r_dbscan, dbscan_min_pnts, min_size)
+	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
-
 	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prms, optimizer)
-
-	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
-	
-	#ldps, ldp_allele = find_longest_disjoint_paths(chrm, r, sig, max_strands, min_size)
-	#return_df = DataFrame(Dict("ldp_allele"=>ldp_allele))
-	return return_df
-end
-
-function assign_loci(chrm, r_dbscan_min :: Real, r_dbscan_max :: Real, r_dbscan_inc :: Real, r_ldp :: Real, sig :: Real,min_size :: Int64, min_prop_unique, dbscan_min_pnts, overlap_thresh, optimizer)
-	#chrm = sort(_chrm, :g)
-	println("fov: ", chrm[1, "fov"], ", cell: ", chrm[1, "cellID"], ", ", chrm[1,"chrom"])
-	#dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, r_dbscan, dbscan_min_pnts, min_size)
-	dbscan_clusters = scan_DBSCAN_radius(chrm, dbscan_min_pnts, min_size, r_dbscan_min, r_dbscan_max, r_dbscan_inc, overlap_thresh)
-	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
-
-	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, min_prop_unique, r_ldp, sig, r_ldp_nbr, min_size, optimizer)
-
 	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
 	return return_df
 end
@@ -142,9 +108,7 @@ function find_longest_disjoint_paths(chrm, prms :: ChromSepParams, max_strands :
 	A, W, g = @time get_neighbors(chrm, prms.r_ldp, prms.sigma)
 	R, WR = @time get_trans_red_w(chrm, prms.r_ldp, prms.sigma, A, W, g)
 	g2, W2 = @time rule_out_edges(A, W, WR)
-	#return @time optimize_paths(chrm, g, g2, W2, min_size, max_strands)
 	return @time optimize_paths(chrm, g2, W2, prms.min_size, max_strands, optimizer)
-	#return @time optimize_paths(chrm, g, W, min_size, max_strands, optimizer)
 end
 
 function get_neighbors(chr, r, sig)
@@ -181,7 +145,6 @@ function get_neighbors(chr, r, sig)
 end
 
 function get_trans_red_w(chr, r, sig, A, W, g)
-
     # compute transitive reduction
     B = adjacency_matrix(transitiveclosure(g))
     R = A .* (0 .== (A*B))
@@ -204,45 +167,6 @@ function rule_out_edges(A, W, WR)
     g2 = DiGraph(A2)
     return g2, W2
 end
-
-"""
-function optimize_paths(chrm, g :: DiGraph, g2:: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64, model)
-	src = nv(g)+1
-	dst = src+1
-	for i in 1:nv(g2)
-		add_edge!(g2, src, i)
-		add_edge!(g2, i, dst)
-	end
-
-	g2_edges = Tuple.(collect(Graphs.edges(g2)))
-	g2_locus_edges = filter(e -> e[1] <= nv(g) && e[2] <= nv(g), g2_edges)
-
-	@variable(model, x[g2_edges], Bin, container=SparseAxisArray)
-	@constraint(model, sum(x[(src,nbr)] for nbr in outneighbors(g2, src)) <= max_strands)
-	@constraint(model, sum(x[(nbr,dst)] for nbr in inneighbors(g2, dst)) <= max_strands)
-	@constraint(model, [i = 1:nv(g)], sum(x[(nbr,i)] for nbr in inneighbors(g2, i)) == sum(x[(i,nbr)] for nbr in outneighbors(g2, i)))
-	@constraint(model, [i = 1:nv(g)], sum(x[(nbr,i)] for nbr in inneighbors(g2, i)) <= 1)
-
-	@objective(model, Max, sum(x[e]*W[e...] for e in g2_locus_edges))
-
-	optimize!(model)
-
-	evals = value.(x)
-	gres = DiGraph(nv(g))
-	for e in g2_edges
-		evals[e] == 1 ? add_edge!(gres, e[1], e[2]) : nothing
-	end
-
-	wccs = weakly_connected_components(gres)
-
-	lccs = length.(wccs)
-	ldps = wccs[lccs .>= min_size]
-
-	allele = get_allele_col(chrm, ldps)
-
-	return ldps, allele
-end
-"""
 
 function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: Int64, max_strands :: Int64, optimizer)
 	nloci = nv(g)
@@ -284,8 +208,6 @@ function optimize_paths(chrm, g :: DiGraph, W :: SparseMatrixCSC, min_size :: In
 
 	allele = get_allele_col(chrm, ldps)
 
-	println("length(ldps): ", length(ldps))
-
 	return ldps, allele
 end
 
@@ -297,53 +219,14 @@ function get_allele_col(chrm, grps)
 	return allele
 end
 
-function cluster_chromosomes_DBSCAN(chrms, prms)#radius, min_neighbors, min_size)
+function cluster_chromosomes_DBSCAN(chrms, prms)
 	if nrow(chrms) <= 3
 		return []
 	end
 	points = Array([chrms.x chrms.y chrms.z]')
-	dbr = dbscan(points, prms.r_dbscan, min_neighbors=prms.dbscan_min_pnts, min_cluster_size=prms.min_size)
+	dbr = dbscan(points, prms.r_dbscan, min_neighbors=prms.dbscan_min_nbrs, min_cluster_size=prms.min_size)
 	dbscan_clusters = [sort(vcat(dbc.core_indices,  dbc.boundary_indices)) for dbc in dbr]
 	return dbscan_clusters
-end
-
-function scan_DBSCAN_radius(chrms, min_neighbors, min_size, rad_min, rad_max, rad_inc, overlap_thresh)
-	old_clusters = []
-	for r in rad_min:rad_inc:rad_max
-		clusters = cluster_chromosomes_DBSCAN(chrms, r, min_neighbors, min_size)
-		subsets = [old ⊆ new for old in old_clusters, new in clusters]
-		if prod(size(subsets)) > 0 
-			nsubsets = sum(subsets, dims=1)
-			merged_subsets = subsets[:,[i for i in 1:length(nsubsets) if nsubsets[i] >1]]
-		else
-			merged_subsets = Matrix(undef,0, 0)
-		end
-		
-
-		#check for overlaps
-		println("size(merged_subsets): ", size(merged_subsets))
-		println("length(clusters): ", length(clusters))
-		println()
-		for i in 1:size(merged_subsets)[2]
-			#merged_clusters = clusters[[j for j in 1:length(merged_subsets[:,i]) if merged_subsets[j,i]]]
-			merged_clusters = [old_clusters[j] for j in 1:length(old_clusters) if merged_subsets[j,i]]
-			if length(merged_clusters) > 1
-				println(length(merged_clusters))
-				merged_clusters_g = [chrms.g[c] for c in merged_clusters]
-				println(length(merged_clusters_g))
-
-				c_gte_l = [c1l >= c2l for c1l in merged_clusters_g[1], c2l in merged_clusters_g[2]]
-				ngt = sum(c_gte_l)
-				npairs = prod(size(c_gte_l))
-				overlap_score = ngt/npairs
-				if overlap_score > overlap_thresh && (1-overlap_thresh) < overlap_score
-					return old_clusters
-				end
-			end
-		end
-		old_clusters = copy(clusters)
-	end
-	return old_clusters
 end
 
 
@@ -351,8 +234,8 @@ end
 Get a strict Longest dijsoint path or two for every DBSCAN cluster. When two LDPs are found, also group points near each ldp
 """
 function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, optimizer)
-	dbscan_ldp_allele = fill(-1, nrow(chrm)) #copy(dbscan_allele)
-	dbscan_ldp_nbr_allele = fill(-1, nrow(chrm)) ## copy(dbscan_allele)
+	dbscan_ldp_allele = fill(-1, nrow(chrm))
+	dbscan_ldp_nbr_allele = fill(-1, nrow(chrm))
 	n_new_alleles = 0
 	ldp_allele_nums = vcat([-1], Array(1:length(dbscan_clusters)))
 	for (i, c) in enumerate(dbscan_clusters)
@@ -360,10 +243,8 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, opti
 		if length(unique(chrm.g[c]))/length(chrm.g[c]) < prm.min_prop_unique && mean_g_nbr_spat_dist(chrm[c,:]) > prm.r_ldp
 			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], prm, 2, optimizer)
 			if length(ldps) > 0
-				#dbscan_c_ldp_allele[ldps[1]] .= i
-				dbscan_ldp_allele[c[ldps[1]]] .= i #dbscan_c_ldp_allele
+				dbscan_ldp_allele[c[ldps[1]]] .= i
 				dbscan_ldp_nbr_allele[c[ldps[1]]] .= i
-				#ldp_allele_nums = [-1, i]
 				if length(ldps) == 2
 					n_new_alleles += 1
 					new_allele= length(dbscan_clusters) + n_new_alleles
@@ -372,8 +253,6 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, opti
 					dbscan_ldp_allele[c[ldps[2]]] .= new_allele
 					dbscan_ldp_nbr_allele[c[ldps[2]]] .= new_allele
 				end
-				#dbscan_ldp_allele[c] .= dbscan_c_ldp_allele
-				#dbscan_ldp_nbr_allele[c] .= dbscan_c_ldp_allele
 			else
 				println("No LDPs: ")
 				println(ldps)
@@ -387,7 +266,6 @@ function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, opti
 			end
 		end
 	end
-	#dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, ldps, r_ldp_nbr, ldp_allele_nums)
 	dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, prm.r_ldp_nbr, ldp_allele_nums)
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
 end
@@ -406,22 +284,13 @@ otherwise legitimate. This function counts how many points within a given radius
 of the longest disjoint paths, and assigned the points to the same allele as the longest disjoint path with the most
 loci in that radius.
 """
-#function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, ldps, r, ldp_allele_nums)
 function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, r, ldp_allele_nums)
 	# make KDTrees of loci assigned to each allele
 	cluster_nums = sort(filter(c -> c != -1, unique(dbscan_ldp_nbr_allele)))
-	#ldp_trees = [KDTree(Array(Array(pnts[ldp,["x","y","z"]])')) for ldp in ldps]
 	c_trees = [KDTree(Array(Array(pnts[dbscan_ldp_nbr_allele .== c,["x","y","z"]])')) for c in cluster_nums]
-	#assigned_loci = sort(vcat(ldps...))
-	#@assert maximum(assigned_loci) <= nrow(pnts)
 	unassigned_loci = filter(locus -> dbscan_ldp_nbr_allele[locus] == -1, Array(1:nrow(pnts)))
-	#unassigned_loci = pnts[unassigned_rows, :]
 	unassigned_coords = Array(Array(pnts[dbscan_ldp_nbr_allele .== -1, ["x","y","z"]])')
-	#unassigned_coords = Array([unassigned_loci.x unassigned_loci.y unassigned_loci.z]')
 	n_allele_nbrs = zeros(sum(dbscan_ldp_nbr_allele .== -1), length(ldp_allele_nums))
-	#for (i, ldp_tree) in enumerate(ldp_trees)
-		#n_allele_nbrs[:, i + 1] .= length.(inrange(ldp_tree, unassigned_coords, r))
-	#end
 	for (i, c_tree) in enumerate(c_trees)
 		n_allele_nbrs[:, i + 1] .= length.(inrange(c_tree, unassigned_coords, r))
 	end
@@ -431,41 +300,4 @@ function assign_ldp_neighbors(pnts, dbscan_ldp_nbr_allele, r, ldp_allele_nums)
 	
 	dbscan_ldp_nbr_allele[unassigned_loci] .= ldp_nbr_allele 
 	return dbscan_ldp_nbr_allele
-end
-
-#function reconcile_LDP_DBSCAN(ldp_allele, dbscan_clusters)
-function compare_LDP_DBSCAN(ldps, dbscan_clusters, chrm, max_strands, ldp_overlap_thresh)
-
-	#LDPs = [Array(1:nrow(chrms))[chrms.allele .== p] for p in 1:maximum(ldp_allele)]
-
-	# find intersections of clusters by dbscan and ldp
-	intersections = [ldp ∩ dbc for ldp in ldps, dbc in dbscan_clusters]
-
-	#find the size of the intersections of clusters found by dbscan and ldp
-	intersection_sizes = length.(intersections)
-
-	accepted = zeros(Bool, size(intersections)...)
-
-	#check whether the cluster agreement passes the threshold
-	for ldp_ind in 1:max_strands
-	    accepted[ldp_ind, :] = (intersection_sizes[ldp_ind,:]./length(ldps[ldp_ind]) .> ldp_overlap_thresh)
-	end
-
-	# find the number of DBSCAN clusters that each LDP cluster overlaps with
-	n_ldp_dbc_overlaps = sum(intersection_sizes .> 0, dims=2)
-	# find the number of LDP clusters that each DBSCAN cluster overlaps with
-	n_dbc_lpc_overlaps = sum(intersection_sizes .> 0, dims=1)
-
-	# Every LDP cluster must match two a DBSCAN cluster, and every DBSCAN cluster must match to 1 or 0 LDP cluster
-	# for us to use the consensus of the two methods. Otherwise, we use LDP only.
-	if (all(n_ldp_dbc_overlaps .== 1) && all(n_dbc_lpc_overlaps .<= 1))
-	    #use union of ldp and its overlapping dbc
-		ldp, dbc, val = findnz(sparse(accepted))
-	    clusters = [sort(ldps[ldp[i]] ∪ dbscan_clusters[dbc[i]]) for i in 1:length(ldp)]
-		allele = get_allele_col(chrm, clusters)
-	else
-		#use ldps
-		allele = get_allele_col(chrm, ldps)
-	end
-	return allele
 end
