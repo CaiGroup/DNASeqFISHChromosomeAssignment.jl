@@ -1,4 +1,4 @@
-export ChromSepParams, set_r_dbscan, set_r_ldp, set_r_ldp_nbr, set_min_size, set_dbscan_min_pnts, set_minProp_unique, set_sigma
+export ChromSepParams, set_r_dbscan, set_r_ldp, set_r_ldp_nbr, set_min_size, set_dbscan_min_nbrs, set_minProp_unique, set_sigma
 
 """
     mutable struct ChromSepParams(

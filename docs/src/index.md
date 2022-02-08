@@ -9,4 +9,13 @@ the LDP chromosome identification method with DBSCAN.
 
 ```@docs
 assign_chromosomes
+ChromSepParams
+ChromSepParams()
+set_r_dbscan
+set_r_ldp
+set_r_ldp_nbr
+set_sigma
+set_min_size
+set_dbscan_min_nbrs
+set_minProp_unique
 ```
