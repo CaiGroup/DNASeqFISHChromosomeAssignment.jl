@@ -10,22 +10,20 @@ using Statistics
 """
 	assign_chromosomes(pnts :: DataFrame, params :: ChromSepParams, optimizer)
 
-This function assigns genomic loci from DNA seqFISH+ data to indiviual chromosomes using DBSCAN and Longest Disjoint Paths (LDP).
-LDP includes spatial and genomic information to effectely separate chromosome copies that are close to each other
-in the cell, while DBSCAN is able to classify repiclated loci onto chromosomes.
+This function assigns genomic loci from DNA seqFISH+ data to indiviual chromosomes using DBSCAN and Longest Disjoint Paths (LDP). First, genomic loci
+are clustering using DBSCAN. Then DBSCAN clusters that contain a proportion of unique genomic loci less than the min_prop_unique parameter set in the params
+object and whose average spatial distance between subsequent spatial loci is greater than the r_ldp parameter (also et in the params object) will be split,
+using the LDP algorithm. If these conditions are not met, then we find one LDP that is a subset of the cluster.
 
-
-LDP builds a directed acyclic graph where every locus has an out going edge to genomically
+LDP works by finding the longest one or two weighted paths of loci of increasing genomic coordinate within the a DBSCAN cluster. More specifically, it builds a directed acyclic graph where every locus has an out going edge to genomically
 down stream loci within the search radius. Edges are weighted by:
 
 ``
-w = (g_{max} - (g_p - g_c)) × e^{-\\frac{||x_p - x_c||^2}{2σ^2}}
+w = \\frac{1}{g_p - g_c} × e^{-\\frac{||x_p - x_c||^2}{2σ^2}}
 ``
 
-where x denotes a vector of spatial coordinates, g denotes genomic coordinates, and p and c subscripts denote parent and child nodes respectively. ``g_{max}``
-is the maximum genomic coordinate for that chromosome found in the cell.
-
-LDP finds up to max_strands disjoint paths that maximize the sum of
+where x denotes a vector of spatial coordinates, g denotes genomic coordinates, and p and c subscripts denote parent and child nodes respectively.
+LDP then uses Integer Programming to find the one or two disjoint paths that maximize the sum of
 the weights of all edges in the paths.
 
 Arguments
@@ -37,51 +35,20 @@ Arguments
 	- y : y spatial coordinate of locus
 	- z : z spatial coordinate of locus
 	- g : genomic coordinate of locus
+- prms : ChromSepParams object containing parameters.
+- optimizer : optional - JuMP compatible optimizer for performing Longest Disjoint Paths optimization. Uses GLPK by default.
 
 
 returns a copy of the input points sorted by fov, cellID, chrom, and g with a
-new column: `ldp_allele`. If the `dbscan` argument is true, also includes `dbscan_allele` and `final_allele` columns.
+new columns: 
+	`dbscan_allele` : DBSCAN clusters of each locus
+	`dbscan_ldp_allele` : ldp subclusters of each dbscan cluster
+	`dbscan_ldp_nbr_allele` : dbscan clusters that are not split, and expands split ldp clusters by assigning ldp neighbors to their cluster.
+
 
 allele = -1 means that a locus was not assigned to a chromosome.
-allele > 0 indicates the chromsome number that the locus was assigned to.
+allele > 0 indicates the allele number of the chromosome that the locus was assigned to.
 
-If the size of an intersection between a DBSCAN and LDP cluster divided by the size of the LDP cluster is more than than `ldp_overlap_thresh`, we say that the two clusters are the same.
-
-If every LDP cluster overlaps with exactly one DBSCAN cluster, and Every DBSCAN cluster overlaps with one or zero LDP clusters, we say the methods agreed, and the final clusters are the
-unions of the overlapping LDP and DBSCAN clusters. Otherwise, the final clusters and the LDP clusters.
-
-In the following example, LDP detects that two copies of a chromosome in the `close_chroms.csv` test data are distinct even though they are spatially close.
-
-```
-julia> first(data, 5)
-5×7 DataFrame
- Row │ fov    cellID  chrom    x        y          z        g
-     │ Int64  Int64   String7  Float64  Float64    Float64  Int64
-─────┼────────────────────────────────────────────────────────────
-   1 │     0      28  chr6     94128.3  1.23568e5  1631.25      1
-   2 │     0      28  chr6     92462.6  1.23556e5  2808.75      6
-   3 │     0      28  chr6     94006.9  1.23476e5  1833.25      8
-   4 │     0      28  chr6     93877.1  1.23784e5  2195.5      10
-   5 │     0      28  chr6     92537.5  1.23505e5  2940.0      11
-
-julia> r = 1500
-julia> sig = 750
-julia> max_paths = 2
-
-julia> res = assign_chromosomes(data, r, sig, max_paths)
-
-julia> first(res,5)
-5×10 DataFrame
- Row │ fov    cellID  chrom    x        y          z        g    ldp_allele  dbscan_allele  final_allele
-     │ Int64  Int64   String7  Float64  Float64    Float64  Int64  Int64       Int64          Int64
-─────┼─────────────────────────────────────────────────────────────────────────────────────────────────────
-   1 │     0      28  chr6     94128.3  1.23568e5  1631.25      1           1              1             1
-   2 │     0      28  chr6     92462.6  1.23556e5  2808.75      6           2              1             2
-   3 │     0      28  chr6     94006.9  1.23476e5  1833.25      8           1              1             1
-   4 │     0      28  chr6     93877.1  1.23784e5  2195.5      10           1              1             1
-   5 │     0      28  chr6     92537.5  1.23505e5  2940.0      11           2              1             2
-
-```
 """
 function assign_chromosomes(pnts :: DataFrame,
 	 						prms :: ChromSepParams,
@@ -105,10 +72,10 @@ function assign_loci(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
 end
 
 function find_longest_disjoint_paths(chrm, prms :: ChromSepParams, max_strands :: Int64, optimizer)
-	A, W, g = @time get_neighbors(chrm, prms.r_ldp, prms.sigma)
-	R, WR = @time get_trans_red_w(chrm, prms.r_ldp, prms.sigma, A, W, g)
-	g2, W2 = @time rule_out_edges(A, W, WR)
-	return @time optimize_paths(chrm, g2, W2, prms.min_size, max_strands, optimizer)
+	A, W, g = get_neighbors(chrm, prms.r_ldp, prms.sigma)
+	R, WR = get_trans_red_w(chrm, prms.r_ldp, prms.sigma, A, W, g)
+	g2, W2 = rule_out_edges(A, W, WR)
+	return optimize_paths(chrm, g2, W2, prms.min_size, max_strands, optimizer)
 end
 
 function get_neighbors(chr, r, sig)

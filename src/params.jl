@@ -28,6 +28,11 @@ mutable struct ChromSepParams
     min_prop_unique :: Real
 end
 
+"""
+    ChromSepParams() 
+
+Constructor for ChromSepParams object using the default parameter values. The user can set the parameter values using parameter setting methods.
+"""
 function ChromSepParams() 
     return ChromSepParams(500, 700, 500, 250, 30, 12, 0.9)
 end
@@ -67,6 +72,18 @@ Set the minimum size of DBSCAN clusters and minimum length of the longest disjoi
 """
 set_min_size(p :: ChromSepParams, min_size :: Real) = p.min_size = min_size
 
+"""
+    set_dbscan_min_nbrs(p :: ChromSepParams, mns :: Int64)
+
+Set the minimum number of neighbors a locus must have within the DBSCAN radius to be incuded in a DBSCAN cluster.
+"""
 set_dbscan_min_nbrs(p :: ChromSepParams, mns :: Int64) = p.dbscan_min_nbrs = mns
 
+"""
+    set_minProp_unique(p :: ChromSepParams, mpu :: Real)
+
+If the proportion of unique loci in a DBSCAN cluster is less than this, the algorithm will then check whether the 
+average spatial distance between loci of subsequent genomic coordinates is greater than r_ldp. If so, then the DBSCAN cluster
+is split into to Longest Disjoint paths.
+"""
 set_minProp_unique(p :: ChromSepParams, mpu :: Real) = p.min_prop_unique = mpu
