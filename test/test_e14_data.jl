@@ -3,9 +3,9 @@ using DataFrames
 using DNASeqFISHChromosomeAssignment
 using Test
 
-test_files = ["E14_r2r1p1c1chr17_r.csv",
-"E14_r2r1p1c1chr16_r.csv",
-"e14_r2r1p4c6c2_r.csv",
+test_files = [
+"E14_r2r1p1c1chr16.csv", # far apart chromsomes
+"e14_r2r1p4c6c2.csv" #close together chromosomes
 ]
 
 
@@ -13,9 +13,9 @@ test_files = ["E14_r2r1p1c1chr17_r.csv",
     for filename in test_files
         pnts = DataFrame(CSV.File(filename))
 
-        pnts[!,"x"] .*= 103 #nm/pixel
-        pnts[!,"y"] .*= 103 #nm/pixel
-        pnts[!,"z"] .*= 250 #nm/slice
+        #pnts[!,"x"] .*= 103 #nm/pixel
+        #pnts[!,"y"] .*= 103 #nm/pixel
+        #pnts[!,"z"] .*= 250 #nm/slice
 
         ps = pnts[:, ["fov", "cellID", "chrom", "x", "y", "z", "g"]]
 
