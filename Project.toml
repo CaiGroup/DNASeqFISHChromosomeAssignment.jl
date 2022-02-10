@@ -1,7 +1,7 @@
 name = "DNASeqFISHChromosomeAssignment"
 uuid = "14c9c92d-b651-44d7-8d4a-e205e966b9d5"
 authors = ["Jonathan A. White <jawhite@caltech.edu>"]
-version = "0.1.1"
+version = "0.1.2"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
