@@ -52,22 +52,123 @@ allele > 0 indicates the allele number of the chromosome that the locus was assi
 """
 function assign_chromosomes(pnts :: DataFrame,
 	 						prms :: ChromSepParams,
-							optimizer = GLPK.Optimizer)
+							optimizer = GLPK.Optimizer,
+							auto_set_rs = true)
 
 	@assert prms.min_size > 1
 	sort!(pnts, [:fov, :cellID, :chrom, :g])
 	chrms = groupby(pnts,[:fov, :cellID, :chrom])
-	assn_chrms(chrm) = assign_loci(chrm, prms, optimizer)
-	res = transform(assn_chrms, chrms)
+
+	# first assign chromosomes by DBSCAN
+	assn_chrms_dbscan(chrm) = assign_loci_dbscan(chrm, prms, auto_set_rs)
+	dbscan_res = transform(assn_chrms_dbscan, chrms)
+	println("finished DBSCAN")
+
+	dbscan_grps = groupby(dbscan_res, [:fov, :cellID, :chrom, :dbscan_allele])
+	
+	if auto_set_rs
+		unambiguous_chrms = filter(chrm -> chrm.dbscan_allele[1] != -1 && length(unique(chrm.g))/nrow(chrm) > prms.min_prop_unique, dbscan_grps)
+
+		dists=vcat(map(get_nbr_loci_dists, collect(unambiguous_chrms))...)
+
+		#unambiguous_res = transform(assn_chrms, unambiguous_chrms)
+		r_ldp = mean(dists)+std(dists)
+		sigma = r_ldp/2
+		set_r_ldp(prms, r_ldp)
+		set_sigma(prms, sigma)
+	end
+
+	assn_chrms_preset_r(chrm) = assign_loci_ldp(chrm, prms, optimizer)
+
+	res = transform(assn_chrms_preset_r, dbscan_grps)
 	return res
 end
 
-function assign_loci(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
+function assign_loci_dbscan(chrm, prms :: ChromSepParams, auto_choose_r=true)
+	if nrow(chrm) < prms.min_size || nrow(chrm) <= prms.dbscan_min_nbrs+1 || nrow(chrm) < 4
+		return DataFrame(Dict("dbscan_allele"=>fill(-1, nrow(chrm))))
+	end
+	if auto_choose_r
+		set_r_dbscan(prms, auto_choose_dbscan_r(chrm, prms))
+	end
 	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
-	dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prms, optimizer)
-	return_df = DataFrame(Dict("dbscan_allele"=>dbscan_allele, "dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
-	return return_df
+	return DataFrame(Dict("dbscan_allele"=>dbscan_allele))
+end
+
+function assign_loci_ldp(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
+	#if auto_choose_r
+	#	set_r_dbscan(prms, auto_choose_dbscan_r(chrm, prms))
+	#end
+	#dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
+	#dbscan_allele = get_allele_col(chrm, dbscan_clusters)
+	#dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prms, optimizer)
+	if chrm.dbscan_allele[1] == -1
+		return DataFrame(Dict("dbscan_ldp_allele"=>fill(-1, nrow(chrm)), "dbscan_ldp_nbr_allele"=>fill(-1, nrow(chrm))))
+	else
+		dbscan_ldp_allele, dbscan_ldp_nbr_allele = get_DBSCAN_cluster_LDPs(chrm, prms, optimizer)
+		return_df = DataFrame(Dict("dbscan_ldp_allele"=>dbscan_ldp_allele, "dbscan_ldp_nbr_allele"=>dbscan_ldp_nbr_allele))
+		return return_df
+	end
+end
+
+function auto_choose_dbscan_r(chrm, prms :: ChromSepParams)
+	coords = Array([chrm.x chrm.y chrm.z]')
+    tree = KDTree(coords)
+	idxs, dists = knn(tree, coords, prms.dbscan_min_nbrs+1)
+	min_pnt_core_rads = maximum.(dists)
+	r_dbscan = mean(min_pnt_core_rads) + std(min_pnt_core_rads)
+	#println("mean(dists) ", mean(min_pnt_core_rads), " sd(dists) ", std(min_pnt_core_rads))
+	#println("r_dbscan $r_dbscan")
+	return r_dbscan
+end
+
+function auto_choose_ldp_r_sigma(chrm, params)
+	g_grpd = groupby(chrm,:g)
+	#g_grpd_a = Array(g_grpd)
+	locus_copynum = combine(nrow, g_grpd)
+	# if below uniqueness threshold (two chromosomes)
+	if nrow(locus_copynum)/nrow(chrm) < params.min_prop_unique
+		println("min_prop_unique: ", params.min_prop_unique)
+		println("prop unique: ", nrow(locus_copynum)/nrow(chrm))
+		#copynum_dict = Dict([(row.g, row.nrow) for row in eachrow(locus_copynum)])
+		dists = Float64[]
+		sizehint!(dists, 2*sum(locus_copynum.nrow .> 1))
+		for (locus_ind, locus_df) in enumerate(g_grpd[1:end-1])
+			if nrow(g_grpd[locus_ind+1]) > 1 
+				for locus in eachrow(DataFrame(locus_df))
+					push!(dists, get_min_nbr_dist(g_grpd[locus_ind+1], locus))
+				end
+			end
+			if nrow(locus_df) > 1
+				for nbr in eachrow(DataFrame(g_grpd[locus_ind+1]))
+					push!(dists, get_min_nbr_dist(locus_df, nbr))
+				end
+			end
+		end 
+	else
+		filtered_chrm = DataFrame(filter(grp -> nrow(grp) == 1, g_grpd))
+		#println(filtered_chrm)
+		nrows = nrow(filtered_chrm)
+    	dists = (Array(filtered_chrm[2:end,["x","y","z"]] .- filtered_chrm[1:(nrows-1),["x","y","z"]])).^2
+		dists = sqrt.(sum(dists, dims=2))
+	end
+	println("mean(dists) ", mean(dists), " std(dists) ", std(dists))
+	r_ldp = mean(dists) + std(dists)
+	sigma = r_ldp/2
+	println("r_ldp $r_ldp, sigma $sigma")
+	return r_ldp, sigma
+end
+
+# find rs from dbscan separated chromsomes
+function find_reasonable_rs(unambiguous_chrms)
+	groupby(unambiguous_chrms, [:])
+	
+end
+
+function get_min_nbr_dist(df1, df2)
+	sqd = (DataFrame(df1)[:, ["x","y","z"]] .- DataFrame(df2)[:, ["x","y","z"]]).^2
+	return minimum(sqrt.(sum(Array(sqd),dims=2)))
 end
 
 function find_longest_disjoint_paths(chrm, prms :: ChromSepParams, max_strands :: Int64, optimizer)
@@ -195,46 +296,67 @@ end
 
 """
 Get a strict Longest dijsoint path or two for every DBSCAN cluster. When two LDPs are found, also group points near each ldp
+
 """
-function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, optimizer)
+#ToDo: Need to figure out how to deal with subsetting multiple dbscan clusters of same chromosome
+
+#function get_DBSCAN_cluster_LDPs(chrm, dbscan_clusters, dbscan_allele, prm, optimizer)
+function get_DBSCAN_cluster_LDPs(chrm, prm, optimizer)
 	dbscan_ldp_allele = fill(-1, nrow(chrm))
 	dbscan_ldp_nbr_allele = fill(-1, nrow(chrm))
 	n_new_alleles = 0
-	ldp_allele_nums = vcat([-1], Array(1:length(dbscan_clusters)))
-	for (i, c) in enumerate(dbscan_clusters)
-		if length(unique(chrm.g[c]))/length(chrm.g[c]) < prm.min_prop_unique && mean_g_nbr_spat_dist(chrm[c,:]) > prm.r_ldp
-			ldps, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], prm, 2, optimizer)
-			if length(ldps) > 0
-				dbscan_ldp_allele[c[ldps[1]]] .= i
-				dbscan_ldp_nbr_allele[c[ldps[1]]] .= i
-				if length(ldps) == 2
-					n_new_alleles += 1
-					new_allele= length(dbscan_clusters) + n_new_alleles
-					push!(ldp_allele_nums, new_allele)
-					dbscan_ldp_allele[c[ldps[2]]] .= new_allele
-					dbscan_ldp_nbr_allele[c[ldps[2]]] .= new_allele
-				end
+	ldp_allele_nums = [-1, chrm.dbscan_allele[1]] #vcat([-1], Array(1:length(dbscan_clusters)))
+
+	#for (i, c) in enumerate(dbscan_clusters)
+		#if auto_set_r
+			#r_ldp, sigma = auto_choose_ldp_r_sigma(chrm[c,:], prm)
+			#set_r_ldp(prm, r_ldp)
+			#set_sigma(prm, sigma)
+		#end
+	if length(unique(chrm.g))/length(chrm.g) < prm.min_prop_unique && mean_g_nbr_spat_dist(chrm) > prm.r_ldp
+		ldps, dbscan_ldp_allele = find_longest_disjoint_paths(chrm, prm, 2, optimizer)
+		if length(ldps) > 0
+			dbscan_ldp_allele[ldps[1]] .= 1
+			dbscan_ldp_nbr_allele[ldps[1]] .= 1
+			if length(ldps) == 2
+				n_new_alleles += 1
+				#new_allele= length(dbscan_clusters) + n_new_alleles
+				new_allele= 1 + n_new_alleles
+				push!(ldp_allele_nums, new_allele)
+				dbscan_ldp_allele[ldps[2]] .= new_allele
+				dbscan_ldp_nbr_allele[ldps[2]] .= new_allele
 			else
-				dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
+				dbscan_ldp_nbr_allele .= chrm.dbscan_allele
 			end
-		else
-			dbscan_ldp_nbr_allele[c] .= dbscan_allele[c]
- 			ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm[c, :], prm, 1, optimizer)
-			if length(ldp) > 0
-				dbscan_ldp_allele[c[ldp[1]]] .= i
-			end
+		end
+	else
+		dbscan_ldp_nbr_allele .= chrm.dbscan_allele
+		ldp, dbscan_c_ldp_allele = find_longest_disjoint_paths(chrm, prm, 1, optimizer)
+		if length(ldp) > 0
+			dbscan_ldp_allele[ldp[1]] .= chrm.dbscan_allele[1]
 		end
 	end
 	dbscan_ldp_nbr_allele = assign_ldp_neighbors(chrm, dbscan_ldp_nbr_allele, prm.r_ldp_nbr, ldp_allele_nums)
 	return dbscan_ldp_allele, dbscan_ldp_nbr_allele
 end
 
-function mean_g_nbr_spat_dist(loci)
-	nrows = nrow(loci)
-    dists = Array(loci[2:end,["x","y","z"]] .- loci[1:(nrows-1),["x","y","z"]])
+function get_nbr_loci_dists(loci)
+	println("nrow(loci): ", nrow(loci))
+	println("dbscan_allele: ", loci.dbscan_allele[1])
+	if nrow(loci) < 2
+		return []
+	end
+	dists = Array(loci[2:end,["x","y","z"]] .- loci[1:end-1,["x","y","z"]])
 	dists .^= 2
-	mean_dist = mean(sqrt.(sum(dists, dims=2)))
-	return mean_dist
+	return sqrt.(sum(dists, dims=2))
+end
+
+function mean_g_nbr_spat_dist(loci)
+	#nrows = nrow(loci)
+    #dists = Array(loci[2:end,["x","y","z"]] .- loci[1:(nrows-1),["x","y","z"]])
+	#dists .^= 2
+	#mean_dist = mean(sqrt.(sum(dists, dims=2)))
+	return mean(get_nbr_loci_dists(loci)) #mean_dist
 end
 
 """

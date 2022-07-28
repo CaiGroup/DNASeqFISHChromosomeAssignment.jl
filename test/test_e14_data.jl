@@ -2,6 +2,8 @@ using CSV
 using DataFrames
 using DNASeqFISHChromosomeAssignment
 using Test
+using GLPK
+
 
 test_files = [
 "E14_r2r1p1c1chr16.csv", # far apart chromsomes
@@ -20,8 +22,9 @@ test_files = [
         ps = pnts[:, ["fov", "cellID", "chrom", "x", "y", "z", "g"]]
 
         prm = ChromSepParams()
+        set_dbscan_min_nbrs(prm, 6)
 
-        res = assign_chromosomes(ps, prm)
+        res = assign_chromosomes(ps, prm, GLPK.Optimizer, false)
 
         new_alleles = Array(pnts[:, ["dbscan_allele", "dbscan_ldp_allele", "dbscan_ldp_nbr_allele"]])
         saved_alleles = Array(res[:, ["dbscan_allele", "dbscan_ldp_allele", "dbscan_ldp_nbr_allele"]])
