@@ -50,7 +50,7 @@ allele = -1 means that a locus was not assigned to a chromosome.
 allele > 0 indicates the allele number of the chromosome that the locus was assigned to.
 
 """
-function assign_chromosomes(pnts :: DataFrame,
+function assign_chromosomes(pnts :: AbstractDataFrame,
 	 						prms :: ChromSepParams,
 							optimizer = GLPK.Optimizer,
 							auto_set_rs = true)
@@ -72,7 +72,7 @@ function assign_chromosomes(pnts :: DataFrame,
 		dists=vcat(map(get_nbr_loci_dists, collect(unambiguous_chrms))...)
 
 		#unambiguous_res = transform(assn_chrms, unambiguous_chrms)
-		r_ldp = mean(dists)+std(dists)
+		r_ldp = mean(dists) + std(dists)
 		sigma = r_ldp/2
 		set_r_ldp(prms, r_ldp)
 		set_sigma(prms, sigma)
@@ -80,7 +80,12 @@ function assign_chromosomes(pnts :: DataFrame,
 
 	assn_chrms_preset_r(chrm) = assign_loci_ldp(chrm, prms, optimizer)
 
-	res = transform(assn_chrms_preset_r, dbscan_grps)
+	res_ldp_split = transform(assn_chrms_preset_r, dbscan_grps)
+
+	#renumber ldps
+	dbacan_allele_groups = groupby(res_ldp_split, [:fov, :cellID, :chrom])
+	res = vcat(map(renumber_ldps, collect(dbacan_allele_groups))...)
+
 	return res
 end
 
@@ -93,6 +98,9 @@ function assign_loci_dbscan(chrm, prms :: ChromSepParams, auto_choose_r=true)
 	end
 	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
 	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
+
+	#check to see if neighboring dbscan clusters have disjoint loci. If so, probably TADs on same chromosome
+
 	return DataFrame(Dict("dbscan_allele"=>dbscan_allele))
 end
 
@@ -169,6 +177,29 @@ end
 function get_min_nbr_dist(df1, df2)
 	sqd = (DataFrame(df1)[:, ["x","y","z"]] .- DataFrame(df2)[:, ["x","y","z"]]).^2
 	return minimum(sqrt.(sum(Array(sqd),dims=2)))
+end
+
+function renumber_ldps(chrm)
+	dbscan_allele_grps = groupby(chrm, :dbscan_allele)
+	#dba_ass = filter(grp -> grp.dbscan_allele[1] != -1, dbscan_allele_grps)
+	dbscan_alleles = filter(a -> a != -1, unique(chrm.dbscan_allele))
+	#println("alleles: ", dbscan_alleles)
+	#println("nalleles: ", typeof(dbscan_alleles))
+	ndbscan_alleles = length(dbscan_alleles)
+	nsplits = 0
+	for dbscan_clust in dbscan_allele_grps
+		dbscan_allele = dbscan_clust.dbscan_allele[1]
+		if dbscan_allele != -1
+			dbscan_clust.dbscan_ldp_allele[dbscan_clust.dbscan_ldp_allele .== 1] .= dbscan_allele
+			#println("loop: ", typeof(unique(dbscan_clust.dbscan_ldp_allele)))
+			#println(unique(dbscan_clust.dbscan_ldp_allele))
+			if length(unique(dbscan_clust.dbscan_ldp_allele)) == 2
+				nsplits += 1
+				dbscan_clust.dbscan_ldp_allele[dbscan_clust.dbscan_ldp_allele .== 2] .= ndbscan_alleles+nsplits
+			end
+		end
+	end
+	return DataFrame(dbscan_allele_grps)
 end
 
 function find_longest_disjoint_paths(chrm, prms :: ChromSepParams, max_strands :: Int64, optimizer)
@@ -319,12 +350,12 @@ function get_DBSCAN_cluster_LDPs(chrm, prm, optimizer)
 			dbscan_ldp_allele[ldps[1]] .= 1
 			dbscan_ldp_nbr_allele[ldps[1]] .= 1
 			if length(ldps) == 2
-				n_new_alleles += 1
+				#n_new_alleles += 1
 				#new_allele= length(dbscan_clusters) + n_new_alleles
-				new_allele= 1 + n_new_alleles
-				push!(ldp_allele_nums, new_allele)
-				dbscan_ldp_allele[ldps[2]] .= new_allele
-				dbscan_ldp_nbr_allele[ldps[2]] .= new_allele
+				#new_allele= 1 + n_new_alleles
+				push!(ldp_allele_nums, 2)
+				dbscan_ldp_allele[ldps[2]] .= 2 #new_allele
+				dbscan_ldp_nbr_allele[ldps[2]] .= 2 #new_allele
 			else
 				dbscan_ldp_nbr_allele .= chrm.dbscan_allele
 			end
@@ -341,8 +372,6 @@ function get_DBSCAN_cluster_LDPs(chrm, prm, optimizer)
 end
 
 function get_nbr_loci_dists(loci)
-	println("nrow(loci): ", nrow(loci))
-	println("dbscan_allele: ", loci.dbscan_allele[1])
 	if nrow(loci) < 2
 		return []
 	end
