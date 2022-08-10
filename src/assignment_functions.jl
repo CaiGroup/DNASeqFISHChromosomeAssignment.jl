@@ -96,13 +96,50 @@ function assign_loci_dbscan(chrm, prms :: ChromSepParams, auto_choose_r=true)
 	if auto_choose_r
 		set_r_dbscan(prms, auto_choose_dbscan_r(chrm, prms))
 	end
-	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms)
-	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
+	dbscan_clusters = cluster_chromosomes_DBSCAN(chrm, prms) #vector of vectors containing indices of members of each dbscan cluster
+	 # convert to labeled category vector
 
+	chrm_dbscan = DataFrame(Dict("dbscan_allele"=>dbscan_allele))
 	#check to see if neighboring dbscan clusters have disjoint loci. If so, probably TADs on same chromosome
+	#dbscan_loci = filter(loci -> loci.dbscan_allele[1] != -1, collect(chrm_dbscan))
+	dbscan_loci = groupby(chrm_dbscan, dbscan_allele)
+
+	nclusters = length(dbscan_clusters)
+	no_merges = true
+	while no_merges
+		nclusters = length(dbscan_clusters)
+		no_merges = true
+		for i = 1:nclusters, j = (i+1):nclusters
+			c1 = dbscan_loci[dbscan_clusters[i], :]
+			c2 = dbscan_loci[dbscan_clusters[j], :]
+			if (maximum(c1.g) < minimum(c2.g) || maximum(c2.g) < minimum(c1.g)) && (check_clusters_nearby(c1, c2) || check_clusters_nearby(c2, c1))
+				println("merge TADs!")
+				dbscan_clusters[i] = vcat(dbscan_clusters[i], dbscan_clusters[j])
+				deleteat!(dbscan_clusters, j)
+				no_merges = false
+			end
+		end
+	end
+
+	dbscan_allele = get_allele_col(chrm, dbscan_clusters)
 
 	return DataFrame(Dict("dbscan_allele"=>dbscan_allele))
 end
+function check_clusters_nearby(c1, c2)
+	# get bounding box
+	c1xmx = maximum(c1.x)
+	c1xmn = minimum(c1.x)
+	c1ymx = maximum(c1.y)
+	c1ymn = minimum(c1.y)
+	c1zmx = maximum(c1.z)
+	c1zmn = minimum(c1.z)
+	width = c1xmx - c1xmn
+	depth = c1ymx - c1ymn
+	height = c1zmx - c1zmn
+	f(loci) = loci.x < c1xmx+width && loci.x > c1xmn-width && loci.y < c1ymx+depth && loci.y > c1ymn-depth && loci.z < c1xmx+height && loci.z > c1xmn-height
+	return nrow(filter(f, c2)) > 0
+end
+
 
 function assign_loci_ldp(chrm, prms :: ChromSepParams, optimizer=GLPK.Optimizer)
 	#if auto_choose_r
