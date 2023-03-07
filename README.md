@@ -6,7 +6,7 @@ This is a julia package for assigning loci in DNASeqFISH to chromosomes. The pac
 
 from the julia REPL type
 ```
-julia> ] add https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment/
+julia> ] add https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment.jl/
 ```
 Or if in the root directory of the repostiory
 ```
