@@ -1,4 +1,4 @@
-# DNASeqFISHChromosomeAssignment
+# DNASeqFISHChromosomeAssignment.jl
 
 This is a julia package for assigning loci in DNASeqFISH to chromosomes. The package uses two algorithms to make the assignments: [DBSCAN](https://en.wikipedia.org/wiki/DBSCAN) and Longest Disjoint paths which we introduce in our paper.
 
