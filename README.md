@@ -14,4 +14,4 @@ julia> ] add .
 ```
 The package provides the function <code>assign_chromsomes</code>. Its use is documented in its docstring in [assign_functions.jl](https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment/blob/main/src/assignment_functions.jl).
 
-For more information, see the [documentation](https://caigroup.github.io/DNASeqFISHChromosomeAssignment.jl/)
+For more information, see the [documentation](https://caigroup.github.io/DNASeqFISHChromosomeAssignment.jl/).
