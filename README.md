@@ -16,6 +16,6 @@ The package provides the function <code>assign_chromsomes</code>. Its use is doc
 
 For more information, see the [documentation](https://caigroup.github.io/DNASeqFISHChromosomeAssignment.jl/).
 
-This package was written for the paper [High-resolution spatial multi-omics reveals cell-type specific nuclear compartments](https://www.biorxiv.org/content/10.1101/2023.05.07.539762v1.abstract). You can find the main page for the data processing and analysis for the paper [here](https://github.com/CaiGroup/dna-seqfish-plus-multi-omics/tree/main)
+This package was written for the paper [High-resolution spatial multi-omics reveals cell-type specific nuclear compartments](https://www.biorxiv.org/content/10.1101/2023.05.07.539762v1.abstract). You can find the main page for the data processing and analysis for the paper [here](https://github.com/CaiGroup/dna-seqfish-plus-multi-omics/tree/main).
 
 If you use this package in a journal article, please cite our [preprint](https://www.biorxiv.org/content/10.1101/2023.05.07.539762v1.abstract).
