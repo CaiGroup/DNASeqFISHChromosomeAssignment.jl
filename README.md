@@ -11,7 +11,7 @@ If you use this package in a journal article, please cite our [preprint](https:/
 
 # Installation
 
-from the julia REPL type
+from the [julia REPL](https://docs.julialang.org/en/v1/stdlib/REPL/) type
 ```
 julia> ] add https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment.jl/
 ```
