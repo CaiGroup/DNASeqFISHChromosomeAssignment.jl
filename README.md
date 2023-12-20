@@ -7,7 +7,7 @@ The package provides the function <code>assign_chromsomes</code>. Its use is doc
 For more information on how to use the functions provided in this package, see the [documentation](https://caigroup.github.io/DNASeqFISHChromosomeAssignment.jl/). The [test folder](https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment.jl/tree/main/test) contains a [script](https://github.com/CaiGroup/DNASeqFISHChromosomeAssignment.jl/blob/main/test/test_e14_data.jl) that shows an example of how to use the package with sample example data.
 
 Public datasets on which you may this package are available. The dataset for [Integrated spatial genomics reveals global architecture of single nuclei](https://doi.org/10.1038/s41586-020-03126-2) is available
- [here](https://zenodo.org/records/3735329), and the dataset for [Single-cell nuclear architecture across cell types in the mouse brain](https://www.science.org/doi/10.1126/science.abj1966)) is available [here](https://doi.org/10.5281/zenodo.4708112).
+ [here](https://zenodo.org/records/3735329), and the dataset for [Single-cell nuclear architecture across cell types in the mouse brain](https://www.science.org/doi/10.1126/science.abj1966) is available [here](https://doi.org/10.5281/zenodo.4708112).
 
 If you use this package in a journal article, please cite our [preprint](https://www.biorxiv.org/content/10.1101/2023.05.07.539762v1.abstract).
 
